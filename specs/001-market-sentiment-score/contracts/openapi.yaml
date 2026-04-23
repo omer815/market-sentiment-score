@@ -1,0 +1,303 @@
+openapi: 3.1.0
+info:
+  title: Market Sentiment Score Dashboard API
+  version: 1.0.0
+  description: >
+    HTTP API exposed by the Cloudflare Worker backend and consumed by the
+    dashboard frontend. Public (no authentication) in v1. All timestamps are
+    ISO-8601 UTC. All numeric scores are in the range [0, 100] where
+    `0 = strong sell` and `100 = strong buy`.
+servers:
+  - url: https://{worker}.workers.dev
+    variables:
+      worker:
+        default: market-sentiment-api
+paths:
+  /api/health:
+    get:
+      summary: Liveness / last-cycle status
+      operationId: getHealth
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/sources:
+    get:
+      summary: List configured data sources with metadata
+      operationId: listSources
+      responses:
+        '200':
+          description: Sources
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SourceMetadata'
+  /api/snapshots/latest:
+    get:
+      summary: Most recent snapshot (dashboard landing)
+      operationId: getLatestSnapshot
+      responses:
+        '200':
+          description: Latest snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '204':
+          description: No snapshot recorded yet (first run, pre-cron)
+  /api/snapshots:
+    get:
+      summary: Historical snapshots over a range
+      operationId: listSnapshots
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Inclusive start, ISO-8601 UTC
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          description: Exclusive end, ISO-8601 UTC
+          schema: { type: string, format: date-time }
+        - name: resolution
+          in: query
+          required: false
+          description: >
+            Bucket granularity. `raw` = 30-min slots. `2h` = 2-hour averages.
+            `1d` = daily averages. If omitted, the server picks based on
+            range length (≤7 d → raw, ≤30 d → 2h, else 1d).
+          schema:
+            type: string
+            enum: [raw, 2h, 1d]
+      responses:
+        '200':
+          description: Series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resolution, points]
+                properties:
+                  resolution:
+                    type: string
+                    enum: [raw, 2h, 1d]
+                  points:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SnapshotPoint'
+        '400':
+          description: Invalid range (e.g., `to` ≤ `from`, range > 5 years)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/sources/{sourceId}:
+    get:
+      summary: Historical readings for a single source
+      operationId: listSourceReadings
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [vix, cnn_fg, sp500, s5fi]
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: resolution
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [raw, 2h, 1d]
+      responses:
+        '200':
+          description: Per-source series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source_id, resolution, points]
+                properties:
+                  source_id:
+                    type: string
+                  resolution:
+                    type: string
+                    enum: [raw, 2h, 1d]
+                  points:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SourcePoint'
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, last_cycle_at, last_cycle_status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: >
+            `ok` if the most recent cycle was `complete` or `partial`;
+            `degraded` if the most recent cycle was `no-data` or the
+            scheduler has missed more than 2 slots.
+        last_cycle_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_cycle_status:
+          type: string
+          enum: [complete, partial, no-data]
+          nullable: true
+    SourceMetadata:
+      type: object
+      required: [source_id, display_name, description, flag_rule, points_on_trigger, update_cadence]
+      properties:
+        source_id:
+          type: string
+          enum: [vix, cnn_fg, sp500, s5fi]
+        display_name: { type: string }
+        description: { type: string }
+        flag_rule:
+          type: string
+          description: >
+            Human-readable threshold rule used by the UI, e.g.,
+            "VIX > 30", "CNN F&G < 20", "S5FI < 20",
+            "≥ 3 consecutive red S&P 500 daily closes".
+        points_on_trigger:
+          type: integer
+          description: Points awarded when the flag is triggered (fixed at 25 in v1).
+          enum: [25]
+        update_cadence:
+          type: string
+          enum: [30m, 1d]
+    SourceReading:
+      type: object
+      required: [source_id, fetch_status, fetched_at]
+      properties:
+        source_id:
+          type: string
+          enum: [vix, cnn_fg, sp500, s5fi]
+        raw_value:
+          type: number
+          nullable: true
+          description: >
+            Source's native value. For `sp500` this is the most recent
+            completed daily close used for the red-streak evaluation.
+        flag_triggered:
+          type: boolean
+          nullable: true
+          description: >
+            Whether this source's flag fired (per its configured rule) on
+            this cycle. NULL when the fetch failed.
+        normalised_value:
+          type: integer
+          enum: [0, 25]
+          nullable: true
+          description: >
+            Points contributed to the composite (`25 * flag_triggered`).
+            NULL when the fetch failed.
+        fetch_status:
+          type: string
+          enum: [ok, stale-source, fetch-failed, parse-failed, rate-limited]
+        fetch_error:
+          type: string
+          nullable: true
+        fetched_at:
+          type: string
+          format: date-time
+    Snapshot:
+      type: object
+      required: [slot_ts, fetched_at, status, composite_score, failed_sources, readings]
+      properties:
+        slot_ts:
+          type: string
+          format: date-time
+        fetched_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [complete, partial, no-data]
+        composite_score:
+          type: integer
+          enum: [0, 25, 50, 75, 100]
+          nullable: true
+          description: >
+            Sum of per-source points. Always a multiple of 25 when
+            non-null. NULL only when `status = 'no-data'`.
+        failed_sources:
+          type: array
+          items:
+            type: string
+        readings:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceReading'
+    SnapshotPoint:
+      type: object
+      required: [slot_ts, composite_score, status]
+      properties:
+        slot_ts:
+          type: string
+          format: date-time
+        composite_score:
+          type: number
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: >
+            Composite score for this point. For `resolution=raw` this is
+            always a multiple of 25. For aggregated resolutions (`2h`,
+            `1d`) this is the mean of the constituent snapshots'
+            composite scores and therefore may be any value in [0, 100].
+        status:
+          type: string
+          enum: [complete, partial, no-data]
+    SourcePoint:
+      type: object
+      required: [slot_ts, normalised_value, fetch_status]
+      properties:
+        slot_ts:
+          type: string
+          format: date-time
+        raw_value:
+          type: number
+          nullable: true
+        normalised_value:
+          type: number
+          minimum: 0
+          maximum: 25
+          nullable: true
+          description: >
+            Points contributed by this source. For `resolution=raw` this
+            is exactly `0` or `25`. For aggregated resolutions (`2h`,
+            `1d`) it is the mean over the bucket and therefore any value
+            in [0, 25].
+        fetch_status:
+          type: string
+          enum: [ok, stale-source, fetch-failed, parse-failed, rate-limited]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        detail:
+          type: string

@@ -1,0 +1,23 @@
+name = "market-sentiment-api"
+main = "src/worker.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 30-minute clock-aligned cron: :00 and :30 of every hour UTC
+[triggers]
+crons = ["0,30 * * * *"]
+
+# D1 database binding — create with: wrangler d1 create market-sentiment
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "market-sentiment"
+database_id = "REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT"
+migrations_dir = "src/storage/migrations"
+
+# Default flag thresholds (can be overridden via `wrangler secret put`)
+[vars]
+VIX_THRESHOLD = "30"
+FG_THRESHOLD = "20"
+S5FI_THRESHOLD = "20"
+SP500_RED_DAYS_MIN = "3"

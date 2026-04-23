@@ -1,0 +1,35 @@
+{
+  "name": "@market-sentiment/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/worker.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
+    "test:unit": "vitest run --dir tests/unit",
+    "test:integration": "vitest run --dir tests/integration",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply market-sentiment --local",
+    "db:migrate": "wrangler d1 migrations apply market-sentiment --remote"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "zod": "^3.23.8",
+    "drizzle-orm": "^0.33.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241001.0",
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-sonarjs": "^2.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "wrangler": "^3.80.0"
+  }
+}
