@@ -1,6 +1,6 @@
 # Session Handoff — Market Sentiment Score
 
-**Written:** 2026-04-23 · **Owner:** omer (GitHub: `omer815`) · **Status:** MVP written, nothing deployed
+**Written:** 2026-04-23 (updated later the same day with the TradingView / GH Actions cron switch) · **Owner:** omer (GitHub: `omer815`) · **Status:** MVP written, nothing deployed
 
 This document is the single-read briefing for whoever (human or AI) picks up
 this project in a new session / on a new machine. If something here
@@ -30,11 +30,12 @@ short-term state; `spec.md` wins for product requirements**.
 
 - Specs, plan, research, data model, OpenAPI + UI contracts, quickstart, 104-task breakdown
 - Constitution v1.0.0 (`.specify/memory/constitution.md`)
-- Backend source (Cloudflare Workers + Hono + Drizzle): fetchers (VIX, CNN F&G, S5FI, S&P 500 daily + intraday), scoring flags + composite, D1 schema + 2 migrations, routes, cron handler, worker entrypoint
-- Backend unit tests: slot rounding, flags, composite, S&P 500 daily parsing
-- Frontend source (React + Vite + TanStack Query): heatmap, scoring breakdown, flag rows, empty/error/stale/partial state components, auto-refresh dashboard
-- Design tokens + copy catalogue (enforced by ESLint: no hard-coded text in `frontend/src/components/**`)
-- GitHub Actions CI (`typecheck` + `lint` + unit tests)
+- **Cron runner (new workspace `scripts/cron/`)**: runs in Node on a GitHub Actions schedule (`0,30 * * * *`). Uses the `@mathieuc/tradingview` npm package (added manually to `package.json`, **not** installed locally) to pull VIX / S&P 500 daily / S5FI, and CNN's dataviz JSON endpoint for Fear & Greed. Computes the four flags + composite and POSTs to `/api/cron/ingest` on the Worker.
+- **Backend (Cloudflare Worker, read + ingest only)**: Hono router with `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest`, and the new bearer-authenticated `POST /api/cron/ingest`. Drizzle + D1 schema + 2 migrations. **No fetchers in the Worker anymore** — the live-data fetch path lives entirely in `scripts/cron/`. The Worker's `scheduled` handler is intentionally not exported (the 30-min cadence is GH Actions, not Cloudflare cron).
+- Backend unit tests: slot rounding, flags, composite (the Worker still owns the scoring code as a second independent copy — drift between the two is guarded by these tests plus the parallel scoring file in `scripts/cron/src/scoring.ts`).
+- Frontend source (React + Vite + TanStack Query): heatmap, scoring breakdown, flag rows, empty/error/stale/partial state components, auto-refresh dashboard.
+- Design tokens + copy catalogue (enforced by ESLint: no hard-coded text in `frontend/src/components/**`).
+- GitHub Actions CI (`typecheck` + `lint` + unit tests) plus the new `cron.yml` scheduler.
 
 **Not done (deliberately, awaiting next session):**
 
@@ -73,11 +74,32 @@ them as standing instructions, not one-shot requests:
 
 ## 4. Locked product decisions (do NOT re-open without a clarify prompt)
 
-- **Hosting:** Cloudflare free tier — Workers (API + cron), D1 (SQLite),
-  Pages (SPA). No always-on VM. Not Vercel, not Fly, not Supabase.
+- **Hosting:** Cloudflare free tier — Workers (read API + ingest endpoint),
+  D1 (SQLite), Pages (SPA). Not Vercel, not Fly, not Supabase.
+- **Cron:** runs as a **GitHub Actions workflow** (`.github/workflows/cron.yml`)
+  on `0,30 * * * *` UTC, **not** as a Cloudflare Worker `scheduled` handler.
+  Rationale: the TradingView npm package (`@mathieuc/tradingview`) opens raw
+  WebSockets via Node `net`/`tls` — not compatible with Workers even with
+  `nodejs_compat`. GH Actions runners are full Node envs where the package
+  works, so the cron pulls data there and POSTs to the Worker.
+- **Data providers:** TradingView via `@mathieuc/tradingview` for VIX
+  (`CBOE:VIX`), S&P 500 daily (`CBOE:SPX`, timeframe `D`), and S5FI
+  (`INDEX:S5FI`). CNN Fear & Greed still comes from
+  `https://production.dataviz.cnn.io/index/fearandgreed/graphdata` (CNN's
+  own dataviz JSON — TradingView doesn't carry F&G). Yahoo Finance
+  endpoints are **no longer used**; the old `backend/src/fetchers/*` files
+  and `backend/src/cron.ts` were deleted.
 - **Cron cadence:** `0,30 * * * *` UTC — clock-aligned to `:00` and `:30`.
-  Snapshots are keyed by the scheduled slot, not wall-clock fetch time,
-  so retries do not duplicate rows.
+  GH Actions schedule is best-effort (can drift 5–15 min under load); the
+  cron runner rounds to the nearest 30-min slot via `currentSlot()`, and
+  the ingest endpoint dedups by D1 primary key on `slot_ts`, so drift is
+  harmless.
+- **Auth on ingest:** `POST /api/cron/ingest` requires
+  `Authorization: Bearer <CRON_SECRET>`. The shared secret is stored as
+  both a Cloudflare Worker secret (`wrangler secret put CRON_SECRET`) and
+  a GitHub Actions repository secret (`Settings → Secrets → Actions →
+  CRON_SECRET`). Must also set `WORKER_URL` as a GH Actions secret
+  pointing at the deployed Worker.
 - **Scoring (see `spec.md` FR-005):** four binary flags × 25 points, so
   composite ∈ `{0, 25, 50, 75, 100}`.
   - VIX > 30
@@ -97,54 +119,47 @@ them as standing instructions, not one-shot requests:
   (`https://production.dataviz.cnn.io/index/fearandgreed/graphdata`). If it
   breaks, the fallback is scraping the public CNN F&G page — not a paid API.
 
-## 5. Repo state snapshot (commit `9b3c541`)
+## 5. Repo state snapshot
 
 ```
 dashboard/
-├─ .claude/skills/speckit-git-*/…          (Spec Kit git extension)
-├─ .github/workflows/ci.yml                 (typecheck + lint + unit tests)
-├─ .specify/
-│  ├─ memory/constitution.md                (v1.0.0 — Code Quality, Testing, UX, Perf)
-│  ├─ extensions.yml, extensions/git/…      (Spec Kit git extension config)
-│  ├─ feature.json                          ({"feature_directory":"specs/001-market-sentiment-score"})
-│  └─ scripts/bash/*.sh                     (Spec Kit helpers — already executable)
-├─ backend/
-│  ├─ wrangler.toml                         (name=market-sentiment-api, cron, D1 binding placeholder, vars)
-│  ├─ package.json                          (@market-sentiment/backend — hono, zod, drizzle, wrangler)
+├─ .claude/skills/speckit-git-*/…           (Spec Kit git extension)
+├─ .github/workflows/
+│  ├─ ci.yml                                (typecheck + lint + unit tests on push/PR)
+│  └─ cron.yml                              (NEW — every 30 min: runs scripts/cron)
+├─ .specify/                                (Spec Kit state — constitution, extensions, feature.json)
+├─ scripts/cron/                            (NEW Node workspace — runs in GH Actions)
+│  ├─ package.json                          (@market-sentiment/cron — @mathieuc/tradingview, zod, tsx)
+│  ├─ tsconfig.json
+│  └─ src/
+│     ├─ run.ts                             (entrypoint: fetch → score → POST)
+│     ├─ tradingview.ts                     (promise wrapper over the WebSocket package)
+│     ├─ slot.ts                            (clock-aligned 30-min slot rounding)
+│     ├─ scoring.ts                         (flags + composite — duplicated from backend)
+│     ├─ types.ts                           (SourceId, FetchResult<T>, payload types)
+│     ├─ fetchers/{vix,s5fi,sp500-daily,cnn-fg}.ts
+│     └─ post.ts                            (POST /api/cron/ingest with bearer token)
+├─ backend/                                 (Cloudflare Worker — read + ingest ONLY)
+│  ├─ wrangler.toml                         (cron triggers disabled, D1 binding placeholder)
+│  ├─ package.json                          (hono, zod, drizzle, wrangler — no fetchers)
 │  ├─ tsconfig.json, vitest.config.ts
 │  └─ src/
-│     ├─ worker.ts                          (default export { fetch, scheduled })
-│     ├─ router.ts                          (Hono app + CORS)
-│     ├─ cron.ts                            (fetch → flag → composite → persist)
-│     ├─ env.ts                             (Env interface for Workers bindings)
+│     ├─ worker.ts                          (default export { fetch } — NO scheduled handler)
+│     ├─ router.ts                          (mounts health/sources/snapshots/cron routes)
+│     ├─ env.ts                             (Env interface — includes CRON_SECRET)
 │     ├─ config.ts                          (Zod-parsed ScoringConfig from env)
-│     ├─ routes/{health,sources,snapshots}.ts
-│     ├─ fetchers/{vix,cnn-fg,s5fi,sp500-daily,sp500-intraday,types}.ts
-│     ├─ scoring/{flags,composite}.ts
+│     ├─ routes/{health,sources,snapshots,ingest}.ts
+│     ├─ fetchers/types.ts                  (ONLY types.ts remains — live fetchers moved to scripts/cron)
+│     ├─ scoring/{flags,composite}.ts       (kept for future re-scoring / tests)
 │     ├─ storage/{schema,client,snapshots,sources}.ts
 │     ├─ storage/migrations/0001_init.sql + 0002_seed_sources.sql
 │     └─ lib/{slot,time,errors}.ts
-│  └─ tests/unit/{slot,flags,composite,sp500-daily}.test.ts
-├─ frontend/
-│  ├─ package.json                          (@market-sentiment/frontend — react, vite, tanstack-query)
-│  ├─ tsconfig.json, vite.config.ts, index.html
-│  └─ src/
-│     ├─ main.tsx, App.tsx, test-setup.ts
-│     ├─ pages/Dashboard.tsx                (MVP page — US1)
-│     ├─ components/{CompositeHeatmap,FlagRow,ScoringBreakdown,EmptyState,ErrorState,PartialBadge,StaleBadge}.tsx
-│     ├─ lib/{api,api-types,copy,heatmap}.ts
-│     └─ styles/{tokens,global}.css
-├─ specs/001-market-sentiment-score/
-│  ├─ spec.md, plan.md, research.md, data-model.md, quickstart.md, tasks.md, HANDOFF.md (this file)
-│  ├─ contracts/{openapi.yaml, ui-contract.md}
-│  └─ checklists/requirements.md
-├─ package.json                             (pnpm workspace root — scripts delegate via `pnpm -r`)
-├─ pnpm-workspace.yaml                      (backend + frontend)
-├─ tsconfig.base.json                       (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
-├─ .eslintrc.cjs                            (strict-type-checked + ban hard-coded JSX text in components/**)
-├─ .prettierrc.json, .editorconfig, .nvmrc (Node 20)
-├─ .gitignore                               (node_modules, .wrangler, .dev.vars, …)
-├─ README.md, CLAUDE.md
+│  └─ tests/unit/{slot,flags,composite}.test.ts
+├─ frontend/                                (unchanged)
+├─ specs/001-market-sentiment-score/        (spec, plan, research, data-model, quickstart, tasks, HANDOFF, contracts/)
+├─ package.json, pnpm-workspace.yaml        (workspaces: backend + frontend + scripts/cron)
+├─ tsconfig.base.json, .eslintrc.cjs, .prettierrc.json, .editorconfig, .nvmrc
+├─ .gitignore, README.md, CLAUDE.md
 ```
 
 Nothing exists in `node_modules`, `.wrangler`, or any build output — those
@@ -154,16 +169,22 @@ are all untouched.
 
 The following are **required** to run anything but have not been done:
 
-| Need | Command | Notes |
-| ---- | ------- | ----- |
-| pnpm workspace deps | `pnpm install` (from repo root) | Will install ~30 direct deps across both workspaces |
-| Cloudflare Wrangler auth | `npx wrangler login` | Opens a browser OAuth flow — ask the owner first |
-| D1 database (remote) | `npx wrangler d1 create market-sentiment` | Returns a `database_id` → paste into `backend/wrangler.toml` (currently `REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT`) |
-| D1 migrations (local) | `pnpm -F @market-sentiment/backend db:migrate:local` | Creates `.wrangler/state/…` SQLite file |
+| Need | Where | Notes |
+| ---- | ----- | ----- |
+| pnpm workspace deps | locally + CI | `pnpm install` (not run locally per owner pref; GH Actions runs it automatically) |
+| Cloudflare Wrangler auth | local `npx wrangler login` | Opens browser OAuth — ask first |
+| D1 database (remote) | `npx wrangler d1 create market-sentiment` | Paste returned `database_id` into `backend/wrangler.toml` (currently `REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT`) |
 | D1 migrations (remote) | `pnpm -F @market-sentiment/backend db:migrate` | Needs login + DB id |
-| Worker deploy | `pnpm -F @market-sentiment/backend deploy` | Needs login + D1 id |
+| **`CRON_SECRET` on Worker** | `npx wrangler secret put CRON_SECRET` | Shared with GH Actions; any long random string |
+| Worker deploy | `pnpm -F @market-sentiment/backend deploy` | Produces `https://market-sentiment-api.<account>.workers.dev` |
+| **`CRON_SECRET` on GitHub** | `Settings → Secrets → Actions → CRON_SECRET` | Same value as Worker secret above |
+| **`WORKER_URL` on GitHub** | `Settings → Secrets → Actions → WORKER_URL` | Deployed Worker base URL, no trailing slash |
+| Threshold env (optional) | `Settings → Secrets → Actions → Variables` | `VIX_THRESHOLD`, `FG_THRESHOLD`, `S5FI_THRESHOLD`, `SP500_RED_DAYS_MIN` — leave unset to use defaults |
 | Frontend build | `pnpm -F @market-sentiment/frontend build` | Output → `frontend/dist/` |
-| Pages deploy | Via Cloudflare dashboard linking the repo, or `wrangler pages deploy frontend/dist` | Decision owed: dashboard vs. CLI |
+| Pages deploy | Cloudflare dashboard (link the repo) or `wrangler pages deploy frontend/dist` | Owner choice |
+
+**Once the above is done, nothing else needs to run locally** — the GH
+Actions cron pushes snapshots automatically every 30 min.
 
 **Prerequisite check on the new Mac:**
 
@@ -195,6 +216,22 @@ If any of those fail, fix them *before* running workspace commands.
 
 ## 8. Known gotchas & reminders
 
+- **TradingView package is unofficial.** `@mathieuc/tradingview` is a
+  reverse-engineered WebSocket client for TradingView's public chart
+  protocol. Field names (`lp`, `periods[*].close`, etc.) are stable at
+  write-time but not documented; if a symbol lookup or a field returns
+  wrong/no data on the first GH Actions run, check the wrapper in
+  `scripts/cron/src/tradingview.ts` first.
+- **TradingView symbols** used: `CBOE:VIX`, `CBOE:SPX`, `INDEX:S5FI`.
+  If any of these resolve to `Symbol not found`, try alternatives:
+  `TVC:VIX` / `SP:SPX` / `INDEX:S5FI` (or omit the prefix). The TV
+  package sometimes wants bare symbols.
+- **Cron drift.** GH Actions scheduled runs can lag by 5–15 min under
+  heavy load. `scripts/cron/src/slot.ts` rounds to the nearest 30-min
+  slot, and D1's PK on `slot_ts` dedups; so a late run writes the right
+  slot, and an early manual retry is a no-op.
+- **GH Actions shuts down scheduled workflows** after 60 days of zero
+  repo activity (pushes, PRs, etc.). A once-a-month commit keeps it alive.
 - **ESLint rule** (`.eslintrc.cjs`, override for `frontend/src/components/**`):
   forbids any `JSXText` matching `/[A-Za-z]/`. All user-facing strings in
   components must flow through `frontend/src/lib/copy.ts`. Pages (`pages/`)
@@ -223,15 +260,20 @@ If any of those fail, fix them *before* running workspace commands.
 (These were not decided in the previous session and will need a direct
 answer from the owner before they can be acted on.)
 
-1. Do we want to actually deploy on Cloudflare now, or keep shipping
-   source only and deploy later in one shot?
+1. **First live verification.** Before the whole thing is trusted, the
+   GH Actions cron needs to run once successfully (TradingView symbols +
+   CNN endpoint all resolve; Worker accepts the ingest). Best path:
+   trigger `workflow_dispatch` manually from the Actions tab once all
+   secrets are set.
 2. For User Story 3's S&P 500 candle chart, stick with `lightweight-charts`
    (locked in `plan.md`) or switch to something simpler given we only need
-   30-min bars? (Current code fetches the data but nothing renders it yet.)
+   30-min bars? (Script already fetches daily candles for scoring; a
+   30-min fetcher is not yet written.)
 3. Observability: Workers Analytics Engine is free but requires code
    writes from the Worker. Acceptable to add before US2/US3 ship?
-4. Is there a preference for where build/test badges should appear on the
-   README once CI runs for the first time?
+4. If TradingView ToS becomes a concern later, fallback is Yahoo Finance
+   (the deleted `backend/src/fetchers/*` are in git history at commit
+   `9b3c541` and can be restored in ~5 min).
 
 ## 10. How to refresh this handoff
 

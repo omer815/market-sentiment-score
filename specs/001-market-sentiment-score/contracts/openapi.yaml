@@ -101,6 +101,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/cron/ingest:
+    post:
+      summary: Ingest a computed snapshot from the external cron runner
+      description: >
+        Server-to-server write endpoint. The 30-minute cadence is driven by a
+        GitHub Actions workflow that uses the TradingView npm package (Node-only,
+        not Workers-compatible) to fetch VIX / S&P 500 / S5FI, plus CNN's dataviz
+        JSON for Fear & Greed, computes the flag rules + composite, and POSTs the
+        completed snapshot here. Authenticated by a shared `Bearer` token whose
+        value is `CRON_SECRET` on the Worker side. Idempotent on `slot_ts` —
+        repeat submissions for the same slot return `200 {inserted: false}`.
+      operationId: ingestSnapshot
+      security:
+        - cronSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestBody'
+      responses:
+        '201':
+          description: New snapshot inserted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slot_ts, inserted]
+                properties:
+                  slot_ts: { type: string, format: date-time }
+                  inserted: { type: boolean, const: true }
+        '200':
+          description: Slot already existed — no write performed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slot_ts, inserted]
+                properties:
+                  slot_ts: { type: string, format: date-time }
+                  inserted: { type: boolean, const: false }
+        '400':
+          description: Malformed body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing / invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/sources/{sourceId}:
     get:
       summary: Historical readings for a single source
@@ -301,3 +354,46 @@ components:
           type: string
         detail:
           type: string
+    IngestBody:
+      type: object
+      description: >
+        Full snapshot computed by the external cron runner. The server does not
+        re-score — it validates, writes to D1 (idempotent on slot_ts), and returns.
+      required:
+        [slot_ts, fetched_at, composite_score, status, failed_sources, readings]
+      properties:
+        slot_ts:
+          type: string
+          format: date-time
+          description: Clock-aligned 30-min slot in ISO-8601 UTC (`:00` or `:30`).
+        fetched_at:
+          type: string
+          format: date-time
+        composite_score:
+          oneOf:
+            - type: integer
+              enum: [0, 25, 50, 75, 100]
+            - type: 'null'
+        status:
+          type: string
+          enum: [complete, partial, no-data]
+        failed_sources:
+          type: array
+          items:
+            type: string
+            enum: [vix, cnn_fg, sp500, s5fi]
+        readings:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/SourceReading'
+  securitySchemes:
+    cronSecret:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >
+        Shared secret matching `CRON_SECRET` on the Worker (set via
+        `wrangler secret put CRON_SECRET`). Same value is stored as the
+        `CRON_SECRET` GitHub Actions repository secret.

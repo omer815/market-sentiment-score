@@ -13,6 +13,60 @@ the remaining technical decisions needed for design.
 
 ---
 
+## Amendment — 2026-04-23 (same day)
+
+After the initial research, two decisions were revised:
+
+### A. Cron moved from Cloudflare Workers to GitHub Actions
+
+**Revised decision:** the 30-min cadence runs as a GitHub Actions
+scheduled workflow (`.github/workflows/cron.yml`, `0,30 * * * *`), not as
+a Cloudflare Worker `scheduled` handler.
+
+**Why the change:** the owner asked to use the `@mathieuc/tradingview`
+npm package for market data (see §B below). That package opens raw
+WebSockets via Node `net`/`tls` and is **not compatible with Cloudflare
+Workers' V8 isolates** even with `nodejs_compat`. GH Actions runners are
+full Node environments where the package works.
+
+**New shape:** GH Actions → Node cron runner (`scripts/cron/`) → fetch &
+score → `POST /api/cron/ingest` on the Worker (bearer-authenticated via
+shared `CRON_SECRET`). D1 remains the source of truth, read via the
+existing GET endpoints. The Worker no longer exports `scheduled`.
+
+**Trade-offs accepted:**
+- GH Actions scheduled workflows have looser timing (5–15 min drift is
+  possible under heavy load) vs. Cloudflare's tight cron. Mitigated by
+  rounding to the nearest 30-min slot on ingest and the D1 PK dedup — a
+  late tick still persists into the correct slot, and duplicates are
+  ignored. Acceptable for "market sentiment every 30 min".
+- GH Actions auto-disables scheduled workflows after 60 days of no repo
+  activity. Mitigated by the fact that this is an active project; a
+  fallback alert can be added later if needed.
+- Authentication boundary widens: the Worker now has a write endpoint.
+  Mitigated by timing-safe bearer-token check + D1 CHECK constraints on
+  every column.
+
+### B. Market data moved from Yahoo Finance to TradingView
+
+**Revised decision:** VIX, S&P 500 daily closes, and S5FI are fetched via
+`@mathieuc/tradingview` (unofficial WebSocket client). CNN Fear & Greed
+stays on `https://production.dataviz.cnn.io/index/fearandgreed/graphdata`
+(TradingView doesn't carry the CNN composite).
+
+**Symbols:** `CBOE:VIX`, `CBOE:SPX` (timeframe `D`), `INDEX:S5FI`.
+
+**Why the change:** owner reported Yahoo's VIX value looked wrong and
+asked for TradingView as the source of truth. Trade-off: TradingView's
+public chart protocol is unofficial and their ToS forbids automated
+access — acceptable for a personal dashboard; would need re-evaluating
+for a production/commercial use.
+
+**Fallback:** the Yahoo fetchers are preserved in git history at commit
+`9b3c541` and can be restored if the TradingView path breaks.
+
+---
+
 ## 1. Hosting platform
 
 **Decision**: Cloudflare (Workers + D1 + Pages), all on the free tier.

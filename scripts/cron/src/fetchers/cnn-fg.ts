@@ -1,7 +1,8 @@
-import { nowIso } from '../lib/time.js';
-import { FetchFailure } from '../lib/errors.js';
-import type { CnnFgPayload, FetchResult } from './types.js';
+import { nowIso } from '../slot.js';
+import type { CnnFgPayload, FetchResult } from '../types.js';
 
+// CNN's own dataviz JSON. TradingView does not carry the CNN Fear & Greed
+// composite, so this endpoint remains the source of truth.
 const URL = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata';
 
 export async function fetchCnnFearAndGreed(): Promise<FetchResult<CnnFgPayload>> {
@@ -23,15 +24,16 @@ export async function fetchCnnFearAndGreed(): Promise<FetchResult<CnnFgPayload>>
       };
     }
     const json = (await res.json()) as CnnFgResponse;
-    const value = json?.fear_and_greed?.score;
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new FetchFailure('parse-failed', 'CNN F&G: no usable score in response');
+    const score = json?.fear_and_greed?.score;
+    if (typeof score !== 'number' || !Number.isFinite(score)) {
+      return {
+        status: 'parse-failed',
+        fetched_at,
+        error: 'CNN F&G: no usable score in response',
+      };
     }
-    return { status: 'ok', value: { raw: value }, fetched_at };
+    return { status: 'ok', value: { raw: score }, fetched_at };
   } catch (err) {
-    if (err instanceof FetchFailure) {
-      return { status: err.status, fetched_at, error: `CNN F&G: ${err.message}` };
-    }
     const msg = err instanceof Error ? err.message : String(err);
     return { status: 'fetch-failed', fetched_at, error: `CNN F&G: ${msg}` };
   }

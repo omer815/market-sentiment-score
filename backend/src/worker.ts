@@ -1,23 +1,11 @@
-import type { Env } from './env.js';
 import { createRouter } from './router.js';
-import { runCron } from './cron.js';
 
 const app = createRouter();
 
+// The 30-minute cron now runs as a GitHub Actions workflow that POSTs a
+// computed snapshot to /api/cron/ingest. The Worker's own `scheduled`
+// handler is therefore intentionally not exported — see specs/*/HANDOFF.md
+// §Architecture for the rationale (TradingView npm package needs Node).
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runCron(env)
-        .then((r) => {
-          console.log(
-            `[cron] slot=${r.slotTs} inserted=${r.inserted} status=${r.status} composite=${r.compositeScore} failed=${r.failedSources.join('|') || 'none'}`,
-          );
-        })
-        .catch((err) => {
-          console.error('[cron] runCron failed', err);
-          throw err;
-        }),
-    );
-  },
 };
