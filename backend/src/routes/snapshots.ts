@@ -13,7 +13,7 @@ export const snapshotsRoute = new Hono<{ Bindings: Env }>();
 snapshotsRoute.get('/latest', async (c) => {
   const db = createDb(c.env.DB);
   const snap = await getLatestSnapshot(db);
-  if (!snap) return c.json({ error: 'no_snapshots', message: 'No snapshots yet.' }, 404);
+  if (!snap) return c.body(null, 204);
 
   const readings = await getReadingsForSlot(db, snap.slotTs);
 

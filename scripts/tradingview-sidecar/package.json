@@ -1,0 +1,24 @@
+{
+  "name": "@market-sentiment/tradingview-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vercel Node serverless function that wraps @mathieuc/tradingview behind a single POST /fetch endpoint. Called by the Cloudflare Worker from its /api/snapshots/refresh orchestrator.",
+  "scripts": {
+    "dev": "vercel dev",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'sidecar: no lint yet' && exit 0",
+    "test:unit": "vitest run --dir tests/unit",
+    "test:integration": "vitest run --dir tests/integration"
+  },
+  "dependencies": {
+    "@mathieuc/tradingview": "3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vercel/node": "^3.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^1.6.0"
+  }
+}

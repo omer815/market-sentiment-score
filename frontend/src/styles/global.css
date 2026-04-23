@@ -163,3 +163,67 @@ a {
 .state-box--error {
   color: var(--color-danger);
 }
+
+.card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.card__header h2,
+.card__header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.card__subtitle {
+  color: var(--color-text-muted);
+  margin: 4px 0 0;
+}
+.card__footnote {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin-top: var(--space-3);
+}
+
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.refresh__button {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  cursor: pointer;
+  min-width: 96px;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+.refresh__button:hover:not(:disabled) {
+  background: var(--color-surface);
+}
+.refresh__button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.refresh__error {
+  font-size: 0.85rem;
+  color: var(--color-danger);
+}
+
+.last-refreshed {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}

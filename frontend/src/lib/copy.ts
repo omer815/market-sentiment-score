@@ -4,7 +4,8 @@ import type { SnapshotStatus, SourceId } from './api-types.js';
 export const copy = {
   app: {
     title: 'Market Sentiment Score',
-    subtitle: 'A 0–100 buy/sell score from four sources, refreshed every 30 minutes.',
+    subtitle: 'A 0–100 buy/sell score from four sources. Click Refresh to pull fresh data.',
+    dataFootnote: 'Data: TradingView (VIX / S&P 500 / S5FI) and CNN dataviz (Fear & Greed).',
   },
   composite: {
     label: {
@@ -34,17 +35,33 @@ export const copy = {
       partial: 'Partial — one or more sources failed',
       'no-data': 'No data — all sources failed',
     } as Record<SnapshotStatus, string>,
-    staleMinutes: (m: number) => `${m} min old`,
   },
   badge: {
     partial: (n: number) => `Partial · ${n} source${n === 1 ? '' : 's'}`,
     partialTitle: (names: string) => `Missing data from: ${names}`,
     partialAria: (names: string) => `Partial snapshot — missing ${names}`,
-    staleAria: (mins: number) => `Snapshot is ${mins} minutes old`,
+  },
+  lastRefreshed: {
+    prefix: 'Last refreshed',
+    ariaLabel: (rel: string) => `Last refreshed ${rel}`,
+  },
+  refresh: {
+    idle: 'Refresh',
+    busy: 'Refreshing…',
+    success: 'Up to date',
+    errorLabel: 'Refresh failed',
+    errorGeneric: "Couldn't refresh the score. Try again?",
+    ariaLabel: 'Fetch a new snapshot now',
+  },
+  empty: {
+    // Shown before the first snapshot exists in the database. The Dashboard
+    // auto-triggers one /refresh on mount in this case, so this copy is what
+    // the user sees briefly while the first refresh runs.
+    firstLoad: 'Fetching the first snapshot…',
+    firstLoadFailed: "Couldn't reach the data sources. Try Refresh again.",
   },
   errors: {
-    none: 'No snapshots yet. Wait for the next 30-minute tick.',
-    generic: 'Something went wrong loading the latest score. We will retry automatically.',
+    generic: 'Something went wrong loading the latest score.',
   },
 } as const;
 

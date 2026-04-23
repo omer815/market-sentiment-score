@@ -1,11 +1,11 @@
 # Session Handoff — Market Sentiment Score
 
-**Written:** 2026-04-23 (updated later the same day with the TradingView / GH Actions cron switch) · **Owner:** omer (GitHub: `omer815`) · **Status:** MVP written, nothing deployed
+**Written:** 2026-04-23 · **Last refreshed:** 2026-04-23 (on-demand `/refresh` + Vercel TradingView sidecar pivot) · **Owner:** omer (GitHub: `omer815`) · **Status:** MVP source complete, nothing deployed
 
 This document is the single-read briefing for whoever (human or AI) picks up
 this project in a new session / on a new machine. If something here
 conflicts with anything else in the repo, **this document wins for
-short-term state; `spec.md` wins for product requirements**.
+short-term state; `spec.md` wins for product requirements.**
 
 ---
 
@@ -13,111 +13,78 @@ short-term state; `spec.md` wins for product requirements**.
 
 - **GitHub repo:** https://github.com/omer815/market-sentiment-score (public)
   - `main` — tracks the MVP commit
-  - `001-market-sentiment-score` — same tip as `main` (feature branch)
-  - Both push to the same remote; `main` is always fast-forwarded from the feature branch.
+  - `001-market-sentiment-score` — feature branch; `main` is fast-forwarded to match
+  - Both push to the same remote; no PRs between them.
 - **Default feature directory:** `specs/001-market-sentiment-score/`
-  - Persisted in `.specify/feature.json` — downstream `/speckit.*` commands read from there, not from the git branch name.
-- **Primary docs to open first** (in this order):
+  - Persisted in `.specify/feature.json`.
+- **Primary docs to open first** (in order):
   1. This file (`HANDOFF.md`) — current state
   2. `spec.md` — product + the "Implementation Status" table at the top
-  3. `plan.md` — tech stack and structure
-  4. `tasks.md` — 104-task backlog (T001…T063 have source code; T064…T104 are not implemented)
+  3. `plan.md` — on-demand `/refresh` architecture, three-workspace layout
+  4. `tasks.md` — 119-task backlog (T001…T090 = MVP, all authored; T091–T119 deferred or polish)
   5. `data-model.md`, `contracts/openapi.yaml`, `contracts/ui-contract.md`, `research.md`, `quickstart.md`
 
 ## 2. What is done vs. what is not
 
 **Done (MVP = User Story 1 — "See the current buy/sell score at a glance"):**
 
-- Specs, plan, research, data model, OpenAPI + UI contracts, quickstart, 104-task breakdown
-- Constitution v1.0.0 (`.specify/memory/constitution.md`)
-- **Cron runner (new workspace `scripts/cron/`)**: runs in Node on a GitHub Actions schedule (`0,30 * * * *`). Uses the `@mathieuc/tradingview` npm package (added manually to `package.json`, **not** installed locally) to pull VIX / S&P 500 daily / S5FI, and CNN's dataviz JSON endpoint for Fear & Greed. Computes the four flags + composite and POSTs to `/api/cron/ingest` on the Worker.
-- **Backend (Cloudflare Worker, read + ingest only)**: Hono router with `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest`, and the unauthenticated `POST /api/cron/ingest`. Drizzle + D1 schema + 2 migrations. **No fetchers in the Worker anymore** — the live-data fetch path lives entirely in `scripts/cron/`. The Worker's `scheduled` handler is intentionally not exported (the 30-min cadence is GH Actions, not Cloudflare cron).
-- Backend unit tests: slot rounding, flags, composite (the Worker still owns the scoring code as a second independent copy — drift between the two is guarded by these tests plus the parallel scoring file in `scripts/cron/src/scoring.ts`).
-- Frontend source (React + Vite + TanStack Query): heatmap, scoring breakdown, flag rows, empty/error/stale/partial state components, auto-refresh dashboard.
-- Design tokens + copy catalogue (enforced by ESLint: no hard-coded text in `frontend/src/components/**`).
-- GitHub Actions CI (`typecheck` + `lint` + unit tests) plus the new `cron.yml` scheduler.
+- Specs, plan, research, data model, OpenAPI + UI contracts, quickstart, 119-task breakdown.
+- Constitution v1.0.0 (`.specify/memory/constitution.md`).
+- **TradingView sidecar workspace (`scripts/tradingview-sidecar/`)** — Vercel Node serverless function exposing `POST /fetch`. Wraps `@mathieuc/tradingview` and returns a combined `{vix, sp500, s5fi}` payload. Per-source failures omit the key; HTTP 502 only on full failure. Unit + integration tests authored.
+- **Backend Worker (`backend/`)** — Hono router, Drizzle + D1, schema + 2 migrations. Routes:
+  - `GET /api/health` — degraded if most-recent snapshot is `no-data` or DB is empty
+  - `GET /api/sources`, `GET /api/sources/:id`
+  - `GET /api/snapshots`, `GET /api/snapshots/latest` (returns 204 when empty)
+  - **`POST /api/snapshots/refresh`** — the single MVP write endpoint; fetches CNN F&G directly + calls the sidecar's `/fetch`, scores, persists, returns the Snapshot. Idempotent on `slot_ts`. Unauthenticated.
+  - `backend/src/orchestrator.ts` is the shared fetch→score→persist pipeline.
+- Backend unit tests: slot rounding, flag evaluation, red-day streak, composite, CNN F&G parser, sidecar response parser. Integration tests scaffolded (`describe.skip`) — see `backend/tests/integration/README.md`.
+- **Frontend (`frontend/`)** — React + Vite + TanStack Query:
+  - `<CompositeHeatmap>`, `<ScoringBreakdown>`, `<FlagRow>`, `<PartialBadge>`
+  - **New for MVP trigger UX (FR-018):** `<RefreshButton>` (busy-state, invalidates latest query, surfaces errors), `<LastRefreshed>` (re-renders every 30 s), `<EmptyState>` with `firstLoad` / `failed` variants.
+  - `<Dashboard>` implements the first-visit auto-trigger (AS1.5) — auto-invokes `/refresh` once when `GET /api/snapshots/latest` returns 204, guarded against StrictMode double-mount.
+  - `StaleBadge.tsx` was **deleted** (no stale badge in MVP, per clarification Q3).
+  - Relative-time formatter (`frontend/src/lib/relative-time.ts`) + copy catalogue update.
+- Design tokens + copy catalogue (ESLint enforces no hard-coded `JSXText` in `frontend/src/components/**`; pages + App exempt).
+- GitHub Actions CI (`typecheck` + `lint` + unit + integration) — `.github/workflows/cron.yml` was deleted; only `ci.yml` remains.
 
 **Not done (deliberately, awaiting next session):**
 
-- **Nothing has ever been installed or executed.** No `pnpm install`, no `wrangler`, no dev server, no D1 database, no deploy. The owner explicitly asked to keep the Mac quiet — **do not start any local processes without asking first.**
-- User Story 2 (auto-refresh + persistence beyond MVP) is scaffolded in routes but **not operationally verified**.
-- User Story 3 (historical charts, S&P 500 30-min candle chart, range picker): **not built**.
-- Polish phase: Playwright E2E, axe accessibility tests, Lighthouse budgets, bundlewatch, Workers Analytics Engine observability, alerting — **not built**.
-- Deployment to Cloudflare (D1 create, migrations applied remotely, Worker deploy, Pages deploy): **not done**.
+- **Nothing has ever been installed or executed.** No `pnpm install`, no `wrangler`, no `vercel` CLI, no D1 database, no deploy. Owner explicitly asked to keep the Mac quiet — **do not start any local processes without asking first.**
+- **User Story 2** (automatic 30-min cadence + durable history beyond MVP): tasks `T091–T098` in `tasks.md` — **deferred**. A US2 re-plan is required to pick the scheduler (Workers WebSocket rewrite / GH Actions / external cron).
+- **User Story 3** (historical charts, S&P 500 candle chart, range picker): tasks `T099–T109` — **not built**.
+- **Polish phase** (`T110–T119`): HANDOFF refresh (done by this commit), UI-contract trimming, README updates, Lighthouse, bundlewatch, Workers Analytics Engine, axe, Playwright.
+- **Deployment** to Cloudflare (D1 create, migrations, Worker deploy, Pages deploy) + Vercel (sidecar deploy). Not done.
 
 See `spec.md` → "Implementation Status" table for the canonical checklist.
 
 ## 3. Strict owner preferences (durable — apply in every session)
 
-These are non-obvious and have been stated explicitly by the owner. Treat
-them as standing instructions, not one-shot requests:
-
-1. **Keep the Mac quiet.** Do not run `pnpm install`, `npm install`,
-   `wrangler`, `vite`, `vitest`, or any dev server without asking first.
-   Writing source files is fine. This was stated verbatim as "I want avoid
-   to run runing progrems on mac".
-2. **Source-only until the owner says otherwise.** "Do not run any npm,
-   wanglerr, or install commands, Just Create all code untill the MVP ok?"
-   Even post-MVP, ask before any command with network or runtime side effects.
-3. **Public GitHub repo under `omer815`** — not `omermircor`. The `gh` CLI is
-   already configured (`gh auth switch --user omer815`, `gh auth setup-git`).
-   The remote `origin` points to `https://github.com/omer815/market-sentiment-score.git`.
-4. **Two-branch workflow:** feature branch `001-market-sentiment-score` is
-   where work lands; `main` is fast-forwarded to match, then both are
-   pushed together. Do not open PRs between them (the owner keeps them
-   identical on purpose).
-5. **Commit style:** `<type>: <summary>` header (e.g. `feat:`, `docs:`),
-   detailed body, and the `Co-Authored-By: Claude …` trailer (see existing
-   commits `833a1f7` and `9b3c541`).
-6. **Language:** the owner types fast and sometimes drops articles; do not
-   ask them to restate — infer and confirm.
+1. **Keep the Mac quiet.** Do not run `pnpm install`, `npm install`, `wrangler`, `vercel`, `vite`, `vitest`, or any dev server without asking first. Writing source files is fine.
+2. **Source-only until the owner says otherwise.** Ask before any command with network or runtime side effects.
+3. **Public GitHub repo under `omer815`** — not `omermircor`. The `gh` CLI is configured (`gh auth switch --user omer815`, `gh auth setup-git`). Remote `origin` = `https://github.com/omer815/market-sentiment-score.git`.
+4. **Two-branch workflow:** feature branch `001-market-sentiment-score` is where work lands; `main` is fast-forwarded to match, then both are pushed together. No PRs between them.
+5. **Commit style:** `<type>: <summary>` header (e.g. `feat:`, `docs:`), detailed body, `Co-Authored-By: Claude …` trailer.
+6. **Language:** the owner types fast and sometimes drops articles; infer and confirm, don't ask them to restate.
 
 ## 4. Locked product decisions (do NOT re-open without a clarify prompt)
 
-- **Hosting:** Cloudflare free tier — Workers (read API + ingest endpoint),
-  D1 (SQLite), Pages (SPA). Not Vercel, not Fly, not Supabase.
-- **Cron:** runs as a **GitHub Actions workflow** (`.github/workflows/cron.yml`)
-  on `0,30 * * * *` UTC, **not** as a Cloudflare Worker `scheduled` handler.
-  Rationale: the TradingView npm package (`@mathieuc/tradingview`) opens raw
-  WebSockets via Node `net`/`tls` — not compatible with Workers even with
-  `nodejs_compat`. GH Actions runners are full Node envs where the package
-  works, so the cron pulls data there and POSTs to the Worker.
-- **Data providers:** TradingView via `@mathieuc/tradingview` for VIX
-  (`CBOE:VIX`), S&P 500 daily (`CBOE:SPX`, timeframe `D`), and S5FI
-  (`INDEX:S5FI`). CNN Fear & Greed still comes from
-  `https://production.dataviz.cnn.io/index/fearandgreed/graphdata` (CNN's
-  own dataviz JSON — TradingView doesn't carry F&G). Yahoo Finance
-  endpoints are **no longer used**; the old `backend/src/fetchers/*` files
-  and `backend/src/cron.ts` were deleted.
-- **Cron cadence:** `0,30 * * * *` UTC — clock-aligned to `:00` and `:30`.
-  GH Actions schedule is best-effort (can drift 5–15 min under load); the
-  cron runner rounds to the nearest 30-min slot via `currentSlot()`, and
-  the ingest endpoint dedups by D1 primary key on `slot_ts`, so drift is
-  harmless.
-- **Auth on ingest:** none. `POST /api/cron/ingest` is intentionally open
-  in v1 — writes are idempotent on `slot_ts` (D1 primary key) and validated
-  by Zod + D1 CHECK constraints, so a duplicate or malformed submission is
-  rejected or dedup'd. Anyone on the internet can POST a snapshot; this is
-  an accepted trade-off for v1 simplicity. Only `WORKER_URL` needs to be
-  set as a GH Actions secret.
-- **Scoring (see `spec.md` FR-005):** four binary flags × 25 points, so
-  composite ∈ `{0, 25, 50, 75, 100}`.
+- **Hosting:** Cloudflare free tier — Workers (read API + refresh endpoint), D1 (SQLite), Pages (SPA) — **plus** Vercel Hobby for the tiny TradingView sidecar Node fn. All on free tiers.
+- **MVP trigger:** on-demand only. `POST /api/snapshots/refresh` is the single write endpoint (FR-018). No scheduled cron — US2 reintroduces one. The dashboard auto-invokes `/refresh` once on first-ever visit (empty DB / 204), never afterwards.
+- **Data providers:**
+  - **TradingView** (via `@mathieuc/tradingview` in the Vercel sidecar): `CBOE:VIX`, `CBOE:SPX` daily candles, `INDEX:S5FI`.
+  - **CNN Fear & Greed** fetched directly by the Worker from `https://production.dataviz.cnn.io/index/fearandgreed/graphdata`.
+- **Why a sidecar?** `@mathieuc/tradingview` uses `ws` → Node `net`/`tls`, which Workers' V8 isolates don't expose (even with `nodejs_compat`). A tiny Vercel Node fn wraps it behind `POST /fetch`; the Worker calls it. Reimplementing TradingView's WebSocket protocol natively in Workers is possible but a multi-day rewrite — deferred.
+- **Auth on `/refresh`:** none. Open in v1. Writes idempotent on `slot_ts` (D1 PK); validated by Zod + D1 CHECK constraints. Sidecar is also open. Only `WORKER_URL` and `TRADINGVIEW_SIDECAR_URL` need to be configured; nothing else.
+- **Scoring (see `spec.md` FR-005):** four binary flags × 25 points, composite ∈ `{0, 25, 50, 75, 100}`.
   - VIX > 30
   - CNN Fear & Greed < 20
   - S5FI < 20
   - S&P 500 has ≥ 3 consecutive red daily closes (longer streaks also trigger)
   - A failed fetch contributes 0 points and flags the snapshot `partial`.
-- **Thresholds are env vars**, not constants, so they can be re-tuned with
-  `wrangler secret put` (names: `VIX_THRESHOLD`, `FG_THRESHOLD`,
-  `S5FI_THRESHOLD`, `SP500_RED_DAYS_MIN`).
-- **Display:** red-to-green heatmap with 5 discrete stops (0 red → 100 green),
-  plus per-flag breakdown rows. Color must not be the only state signal —
-  numeric value + text label + ✓/✗ are required for WCAG AA.
-- **Auth:** public, no accounts, no allow-list, no CAPTCHA in v1.
-- **Partial snapshots:** never carry forward stale values into the composite.
-- **CNN F&G source:** use CNN's own dataviz JSON endpoint
-  (`https://production.dataviz.cnn.io/index/fearandgreed/graphdata`). If it
-  breaks, the fallback is scraping the public CNN F&G page — not a paid API.
+- **Thresholds are env vars** (`VIX_THRESHOLD`, `FG_THRESHOLD`, `S5FI_THRESHOLD`, `SP500_RED_DAYS_MIN`), runtime-tunable via `wrangler secret put`.
+- **Display:** red-to-green heatmap, 5 discrete stops, numeric + text label + ✓/✗ per flag (WCAG AA).
+- **Public, no accounts, no allow-list, no CAPTCHA in v1.**
+- **Partial snapshots** never carry forward stale values into the composite.
 
 ## 5. Repo state snapshot
 
@@ -125,64 +92,73 @@ them as standing instructions, not one-shot requests:
 dashboard/
 ├─ .claude/skills/speckit-git-*/…           (Spec Kit git extension)
 ├─ .github/workflows/
-│  ├─ ci.yml                                (typecheck + lint + unit tests on push/PR)
-│  └─ cron.yml                              (NEW — every 30 min: runs scripts/cron)
+│  └─ ci.yml                                (typecheck + lint + unit tests on push/PR)
 ├─ .specify/                                (Spec Kit state — constitution, extensions, feature.json)
-├─ scripts/cron/                            (NEW Node workspace — runs in GH Actions)
-│  ├─ package.json                          (@market-sentiment/cron — @mathieuc/tradingview, zod, tsx)
-│  ├─ tsconfig.json
+├─ scripts/tradingview-sidecar/             (Vercel Node fn — wraps @mathieuc/tradingview)
+│  ├─ package.json                          (@market-sentiment/tradingview-sidecar)
+│  ├─ tsconfig.json, vercel.json, vitest.config.ts, .gitignore
+│  ├─ api/
+│  │  └─ fetch.ts                           (POST /fetch — fans out to 3 fetchers)
+│  ├─ src/
+│  │  ├─ tradingview.ts                     (promise wrapper over the WS package)
+│  │  ├─ types.ts                           (local payload types)
+│  │  └─ fetchers/{vix,sp500-daily,s5fi}.ts
+│  └─ tests/
+│     ├─ unit/{vix,s5fi,sp500-daily}.test.ts
+│     └─ integration/fetch.test.ts
+├─ backend/                                 (Cloudflare Worker — read + refresh ONLY)
+│  ├─ wrangler.toml                         (no cron triggers; D1 binding placeholder; TRADINGVIEW_SIDECAR_URL as secret)
+│  ├─ package.json, tsconfig.json, vitest.config.ts
 │  └─ src/
-│     ├─ run.ts                             (entrypoint: fetch → score → POST)
-│     ├─ tradingview.ts                     (promise wrapper over the WebSocket package)
-│     ├─ slot.ts                            (clock-aligned 30-min slot rounding)
-│     ├─ scoring.ts                         (flags + composite — duplicated from backend)
-│     ├─ types.ts                           (SourceId, FetchResult<T>, payload types)
-│     ├─ fetchers/{vix,s5fi,sp500-daily,cnn-fg}.ts
-│     └─ post.ts                            (POST /api/cron/ingest — unauthenticated)
-├─ backend/                                 (Cloudflare Worker — read + ingest ONLY)
-│  ├─ wrangler.toml                         (cron triggers disabled, D1 binding placeholder)
-│  ├─ package.json                          (hono, zod, drizzle, wrangler — no fetchers)
-│  ├─ tsconfig.json, vitest.config.ts
-│  └─ src/
-│     ├─ worker.ts                          (default export { fetch } — NO scheduled handler)
-│     ├─ router.ts                          (mounts health/sources/snapshots/cron routes)
-│     ├─ env.ts                             (Env interface — DB + threshold vars)
-│     ├─ config.ts                          (Zod-parsed ScoringConfig from env)
-│     ├─ routes/{health,sources,snapshots,ingest}.ts
-│     ├─ fetchers/types.ts                  (ONLY types.ts remains — live fetchers moved to scripts/cron)
-│     ├─ scoring/{flags,composite}.ts       (kept for future re-scoring / tests)
+│     ├─ worker.ts                          (default export { fetch } — no scheduled)
+│     ├─ router.ts                          (mounts health/sources/snapshots/refresh)
+│     ├─ orchestrator.ts                    (NEW — runRefresh pipeline)
+│     ├─ env.ts                             (Env: DB + TRADINGVIEW_SIDECAR_URL + thresholds)
+│     ├─ config.ts                          (Zod ScoringConfig from env)
+│     ├─ routes/{health,sources,snapshots,refresh}.ts   (NEW refresh.ts)
+│     ├─ fetchers/{types,cnn-fg,sidecar}.ts (NEW cnn-fg.ts + sidecar.ts)
+│     ├─ scoring/{flags,composite}.ts
 │     ├─ storage/{schema,client,snapshots,sources}.ts
 │     ├─ storage/migrations/0001_init.sql + 0002_seed_sources.sql
 │     └─ lib/{slot,time,errors}.ts
-│  └─ tests/unit/{slot,flags,composite}.test.ts
-├─ frontend/                                (unchanged)
-├─ specs/001-market-sentiment-score/        (spec, plan, research, data-model, quickstart, tasks, HANDOFF, contracts/)
-├─ package.json, pnpm-workspace.yaml        (workspaces: backend + frontend + scripts/cron)
+│  └─ tests/
+│     ├─ unit/{slot,flags,red-streak,composite,cnn-fg.parser,sidecar.parser}.test.ts
+│     └─ integration/{README.md,refresh,idempotent,partial,sidecar-down,read}.test.ts  (describe.skip)
+├─ frontend/                                (React + Vite + TanStack Query)
+│  ├─ index.html, vite.config.ts, tsconfig.json, package.json
+│  └─ src/
+│     ├─ main.tsx, App.tsx, test-setup.ts
+│     ├─ styles/{tokens.css,global.css}
+│     ├─ lib/{api,api-types,copy,heatmap,relative-time}.ts
+│     ├─ components/{CompositeHeatmap,FlagRow,ScoringBreakdown,PartialBadge,EmptyState,ErrorState,RefreshButton,LastRefreshed}.tsx
+│     ├─ pages/Dashboard.tsx
+│     └─ …*.test.tsx                        (relative-time, CompositeHeatmap, PartialBadge, LastRefreshed, RefreshButton, Dashboard)
+├─ specs/001-market-sentiment-score/        (spec, plan, research, data-model, quickstart, tasks, HANDOFF, contracts/, checklists/)
+├─ package.json, pnpm-workspace.yaml        (backend + frontend + scripts/tradingview-sidecar)
 ├─ tsconfig.base.json, .eslintrc.cjs, .prettierrc.json, .editorconfig, .nvmrc
 ├─ .gitignore, README.md, CLAUDE.md
 ```
 
-Nothing exists in `node_modules`, `.wrangler`, or any build output — those
-are all untouched.
+Nothing exists in `node_modules`, `.wrangler`, `.vercel`, or any build output.
 
 ## 6. Environment that is NOT provisioned
 
-The following are **required** to run anything but have not been done:
-
 | Need | Where | Notes |
 | ---- | ----- | ----- |
-| pnpm workspace deps | locally + CI | `pnpm install` (not run locally per owner pref; GH Actions runs it automatically) |
+| pnpm workspace deps | locally + CI | `pnpm install` (not run locally per owner pref; CI runs it automatically) |
+| Vercel CLI auth | local `vercel login` | Opens browser OAuth — ask first |
+| Vercel project link | `cd scripts/tradingview-sidecar && vercel link` | Binds to a Vercel project |
+| Sidecar deploy | `vercel --prod` from `scripts/tradingview-sidecar/` | Prints the sidecar URL (e.g. `https://tradingview-sidecar.vercel.app`) |
 | Cloudflare Wrangler auth | local `npx wrangler login` | Opens browser OAuth — ask first |
-| D1 database (remote) | `npx wrangler d1 create market-sentiment` | Paste returned `database_id` into `backend/wrangler.toml` (currently `REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT`) |
+| D1 database (remote) | `npx wrangler d1 create market-sentiment` | Paste returned `database_id` into `backend/wrangler.toml` |
 | D1 migrations (remote) | `pnpm -F @market-sentiment/backend db:migrate` | Needs login + DB id |
+| **`TRADINGVIEW_SIDECAR_URL` secret** | `npx wrangler secret put TRADINGVIEW_SIDECAR_URL` | The `https://…vercel.app` URL from the sidecar deploy |
 | Worker deploy | `pnpm -F @market-sentiment/backend deploy` | Produces `https://market-sentiment-api.<account>.workers.dev` |
-| **`WORKER_URL` on GitHub** | `Settings → Secrets → Actions → WORKER_URL` | Deployed Worker base URL, no trailing slash |
-| Threshold env (optional) | `Settings → Secrets → Actions → Variables` | `VIX_THRESHOLD`, `FG_THRESHOLD`, `S5FI_THRESHOLD`, `SP500_RED_DAYS_MIN` — leave unset to use defaults |
+| Threshold overrides (optional) | `wrangler secret put VIX_THRESHOLD` etc. | Defaults already set in `wrangler.toml [vars]` |
 | Frontend build | `pnpm -F @market-sentiment/frontend build` | Output → `frontend/dist/` |
 | Pages deploy | Cloudflare dashboard (link the repo) or `wrangler pages deploy frontend/dist` | Owner choice |
 
-**Once the above is done, nothing else needs to run locally** — the GH
-Actions cron pushes snapshots automatically every 30 min.
+**Ordering note:** deploy the sidecar **first** so you have its URL to plug into `TRADINGVIEW_SIDECAR_URL` before deploying the Worker.
 
 **Prerequisite check on the new Mac:**
 
@@ -197,81 +173,35 @@ If any of those fail, fix them *before* running workspace commands.
 
 ## 7. How the next session should start
 
-1. **Read the headers of these files in order:** `HANDOFF.md` (this file),
-   `spec.md`, `tasks.md`. That gives you the full picture in ~3 minutes.
-2. **Confirm the owner's goal for this session.** Likely candidates:
-   - (a) Deploy to Cloudflare and see a first live snapshot (requires
-     running commands — *ask first*).
-   - (b) Continue building User Story 2 (durable history view, auto-refresh
-     verification) — more source code, still no runs.
-   - (c) Continue building User Story 3 (historical chart, S&P 500 candle
-     chart) — more source code, still no runs.
-   - (d) Hardening: add Playwright E2E, axe a11y tests, Lighthouse budgets.
-3. **Respect the "no Mac processes" rule** unless the owner explicitly lifts
-   it for this session. When in doubt, write code and ask.
-4. **When committing:** commit on `001-market-sentiment-score`, fast-forward
-   `main`, push both. Use the commit style already in the log.
+1. Read **`HANDOFF.md`** (this file), `spec.md`, `tasks.md` headers. ~3 min.
+2. Confirm the owner's goal. Likely candidates:
+   - (a) **Deploy** to Vercel + Cloudflare and see a first live `/refresh` snapshot (requires running commands — **ask first**).
+   - (b) **US2 re-plan** — pick a scheduler and land the 30-min cadence.
+   - (c) **US3 history** — range picker + chart.
+   - (d) **Hardening** — Playwright E2E, axe, Lighthouse, Workers Analytics Engine.
+3. **Respect the "no Mac processes" rule.** When in doubt, write code and ask.
+4. **When committing:** commit on `001-market-sentiment-score`, fast-forward `main`, push both.
 
 ## 8. Known gotchas & reminders
 
-- **TradingView package is unofficial.** `@mathieuc/tradingview` is a
-  reverse-engineered WebSocket client for TradingView's public chart
-  protocol. Field names (`lp`, `periods[*].close`, etc.) are stable at
-  write-time but not documented; if a symbol lookup or a field returns
-  wrong/no data on the first GH Actions run, check the wrapper in
-  `scripts/cron/src/tradingview.ts` first.
-- **TradingView symbols** used: `CBOE:VIX`, `CBOE:SPX`, `INDEX:S5FI`.
-  If any of these resolve to `Symbol not found`, try alternatives:
-  `TVC:VIX` / `SP:SPX` / `INDEX:S5FI` (or omit the prefix). The TV
-  package sometimes wants bare symbols.
-- **Cron drift.** GH Actions scheduled runs can lag by 5–15 min under
-  heavy load. `scripts/cron/src/slot.ts` rounds to the nearest 30-min
-  slot, and D1's PK on `slot_ts` dedups; so a late run writes the right
-  slot, and an early manual retry is a no-op.
-- **GH Actions shuts down scheduled workflows** after 60 days of zero
-  repo activity (pushes, PRs, etc.). A once-a-month commit keeps it alive.
-- **ESLint rule** (`.eslintrc.cjs`, override for `frontend/src/components/**`):
-  forbids any `JSXText` matching `/[A-Za-z]/`. All user-facing strings in
-  components must flow through `frontend/src/lib/copy.ts`. Pages (`pages/`)
-  and the top-level `App.tsx` are exempt.
-- **strict TS** with `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`.
-  Index accesses (`arr[i]`) return `T | undefined`. Use non-null assertion
-  (`!`) only when the bound check is obvious and local.
-- **Drizzle + D1:** `onConflictDoNothing({ target: snapshots.slotTs })` is
-  how the cron dedups. Readings use `onConflictDoNothing()` on the
-  composite PK `(slot_ts, source_id)`.
-- **`latestDate` from `parseDaily`:** uses `toISOString().slice(0, 10)` —
-  already UTC, matches Yahoo's timestamps.
-- **S&P 500 daily fetcher** strips any bar whose timestamp is within the
-  last 12 hours so we never score on today's unfinished bar.
-- **Duplicate account in `gh`:** both `omermircor` and `omer815` are logged
-  in. Always check `gh auth status` before creating GitHub resources; the
-  owner wants work under `omer815`.
-- **Free-tier constraints:** do not add any dependency that needs a paid
-  plan. No Vercel, no Sentry paid tier, no paid market-data APIs. CNN F&G
-  via dataviz JSON is acceptable; if blocked, the fallback is a scrape.
-- **Owner's typing style:** "wanglerr" = `wrangler`, "C5FI" = `S5FI`,
-  "3 days read" = 3 red days. Interpret kindly and move on.
+- **TradingView package is unofficial.** `@mathieuc/tradingview` is reverse-engineered. Field names (`lp`, `periods[*].close`) are stable at write-time but not documented. If the first live `/refresh` returns `Symbol not found`, try `TVC:VIX` / `SP:SPX` / bare `S5FI`.
+- **Vercel cold start** on a Hobby function is ~1 s; worst-case end-to-end `/refresh` is ~6 s. The UI shows a busy state so this is honest.
+- **Vercel Hobby per-invocation cap: 10 s.** Tight but enough for 3 parallel TradingView resolves.
+- **ESLint rule** (override for `frontend/src/components/**`): forbids any `JSXText` matching `/[A-Za-z]/`. All user-facing strings in components must flow through `frontend/src/lib/copy.ts`. Pages and `App.tsx` are exempt.
+- **strict TS** with `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`. Index accesses return `T | undefined`; use `!` sparingly.
+- **Drizzle + D1** dedup: `onConflictDoNothing({ target: snapshots.slotTs })` on snapshots; readings use the composite PK `(slot_ts, source_id)`.
+- **S&P 500 daily fetcher** strips any bar within the last 12 h (today's unfinished candle).
+- **Dashboard auto-trigger** is guarded with a `useRef` so React StrictMode's double-mount doesn't fire two `/refresh` calls.
+- **Two `gh` accounts** logged in: `omermircor` and `omer815`. Always check `gh auth status` — work under `omer815`.
+- **Integration tests are scaffolded, not running.** See `backend/tests/integration/README.md`: they need the Miniflare + Workers Vitest pool wired up once the owner lifts the no-local-processes rule.
+- **"Stale" badge was removed** for MVP (see clarification Q3). `StaleBadge.tsx` was deleted; `<LastRefreshed>` renders the age instead.
 
 ## 9. Open questions for the next session
 
-(These were not decided in the previous session and will need a direct
-answer from the owner before they can be acted on.)
-
-1. **First live verification.** Before the whole thing is trusted, the
-   GH Actions cron needs to run once successfully (TradingView symbols +
-   CNN endpoint all resolve; Worker accepts the ingest). Best path:
-   trigger `workflow_dispatch` manually from the Actions tab once all
-   secrets are set.
-2. For User Story 3's S&P 500 candle chart, stick with `lightweight-charts`
-   (locked in `plan.md`) or switch to something simpler given we only need
-   30-min bars? (Script already fetches daily candles for scoring; a
-   30-min fetcher is not yet written.)
-3. Observability: Workers Analytics Engine is free but requires code
-   writes from the Worker. Acceptable to add before US2/US3 ship?
-4. If TradingView ToS becomes a concern later, fallback is Yahoo Finance
-   (the deleted `backend/src/fetchers/*` are in git history at commit
-   `9b3c541` and can be restored in ~5 min).
+1. **First live verification.** Deploy sidecar to Vercel, then Worker to Cloudflare, then `curl -X POST https://…/api/snapshots/refresh`. If TradingView symbols fail, try alternatives (§8).
+2. **US2 scheduler choice.** Workers native WebSocket rewrite? GH Actions calling `/refresh`? Hosted cron service? The answer changes what tasks `T091–T098` look like.
+3. **Observability priority.** Workers Analytics Engine counters (`refresh.success{source}`, `refresh.failure{source, reason}`, `refresh.duration_ms`) are free but need code writes. Add before US2 or later?
+4. **Cloudflare Containers** are newly GA — could eliminate the Vercel sidecar entirely once their free tier is clear. Revisit post-MVP.
 
 ## 10. How to refresh this handoff
 
@@ -279,10 +209,8 @@ After any meaningful session:
 
 - Update **Section 2** (what's done vs. not).
 - Update **Section 5** if files are added/removed.
-- Update **Section 6** if any command is now "done" (strike-through or
-  move to "provisioned").
+- Update **Section 6** if any command is now "done".
 - Append to **Section 9** when new questions surface.
 - Bump the date at the top.
 
-Keep this file under ~250 lines so it stays cheap to load at the start of
-every session.
+Keep this file under ~300 lines.

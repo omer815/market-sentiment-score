@@ -3,11 +3,8 @@ main = "src/worker.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron triggers intentionally disabled. The 30-minute cadence runs as a
-# GitHub Actions workflow (.github/workflows/cron.yml) which uses the
-# TradingView npm package (Node-only) and POSTs to /api/cron/ingest.
-# [triggers]
-# crons = ["0,30 * * * *"]
+# MVP trigger is on-demand via POST /api/snapshots/refresh (FR-018).
+# No scheduled cron in MVP — US2 reintroduces automatic cadence.
 
 # D1 database binding — create with: wrangler d1 create market-sentiment
 # then paste the returned database_id below.
@@ -17,13 +14,18 @@ database_name = "market-sentiment"
 database_id = "REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT"
 migrations_dir = "src/storage/migrations"
 
-# Default flag thresholds (override via `wrangler secret put` if you want
-# them hidden, otherwise they're just plain vars).
+# Default flag thresholds. Override per-environment via `wrangler secret put`
+# if you want them hidden, otherwise they're plain vars.
 [vars]
 VIX_THRESHOLD = "30"
 FG_THRESHOLD = "20"
 S5FI_THRESHOLD = "20"
 SP500_RED_DAYS_MIN = "3"
 
-# POST /api/cron/ingest is intentionally open — no auth. Writes are
+# TRADINGVIEW_SIDECAR_URL must be set via `wrangler secret put TRADINGVIEW_SIDECAR_URL`
+# — it's the https://…vercel.app URL of the Vercel Node fn deployed from
+# scripts/tradingview-sidecar/. The Worker calls `${URL}/fetch` from
+# /api/snapshots/refresh.
+
+# POST /api/snapshots/refresh is intentionally open — no auth. Writes are
 # idempotent on `slot_ts` (D1 PK) and validated by Zod + CHECK constraints.

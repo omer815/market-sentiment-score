@@ -37,7 +37,24 @@ export interface Snapshot {
   readings: SourceReading[];
 }
 
+export interface Health {
+  status: 'ok' | 'degraded';
+  last_cycle_at: string | null;
+  last_cycle_status: SnapshotStatus | null;
+}
+
+/**
+ * POST /api/snapshots/refresh response shapes.
+ *  - 201: the Snapshot with `inserted: true`
+ *  - 200: `{slot_ts, inserted: false, snapshot: Snapshot}`
+ *  - 502: upstream-failed error
+ */
+export type RefreshResponse =
+  | ({ inserted: true } & Snapshot)
+  | { slot_ts: string; inserted: false; snapshot: Snapshot };
+
 export interface ApiError {
   error: string;
-  message: string;
+  message?: string;
+  detail?: string;
 }
