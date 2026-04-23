@@ -25,5 +25,5 @@ FG_THRESHOLD = "20"
 S5FI_THRESHOLD = "20"
 SP500_RED_DAYS_MIN = "3"
 
-# CRON_SECRET must be set via `wrangler secret put CRON_SECRET` — the GitHub
-# Actions workflow sends it as a Bearer token on POST /api/cron/ingest.
+# POST /api/cron/ingest is intentionally open — no auth. Writes are
+# idempotent on `slot_ts` (D1 PK) and validated by Zod + CHECK constraints.

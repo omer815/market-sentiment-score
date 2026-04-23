@@ -38,16 +38,6 @@ const IngestSchema = z.object({
 export const ingestRoute = new Hono<{ Bindings: Env }>();
 
 ingestRoute.post('/ingest', async (c) => {
-  const expected = c.env.CRON_SECRET;
-  if (!expected) {
-    return c.json({ error: 'not_configured', message: 'CRON_SECRET is not set' }, 500);
-  }
-  const auth = c.req.header('authorization') ?? '';
-  const provided = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!timingSafeEqual(provided, expected)) {
-    return c.json({ error: 'unauthorized', message: 'bad or missing bearer token' }, 401);
-  }
-
   let json: unknown;
   try {
     json = await c.req.json();
@@ -64,7 +54,6 @@ ingestRoute.post('/ingest', async (c) => {
   }
   const body = parsed.data;
 
-  // Consistency checks that Zod can't express cleanly.
   if (body.status === 'no-data' && body.composite_score !== null) {
     return c.json({ error: 'bad_request', message: 'no-data must have null composite_score' }, 400);
   }
@@ -95,13 +84,3 @@ ingestRoute.post('/ingest', async (c) => {
 
   return c.json({ slot_ts: body.slot_ts, inserted }, inserted ? 201 : 200);
 });
-
-/** Constant-time string compare to avoid leaking secret length via timing. */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}

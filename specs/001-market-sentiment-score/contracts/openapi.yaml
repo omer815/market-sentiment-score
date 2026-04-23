@@ -109,12 +109,12 @@ paths:
         GitHub Actions workflow that uses the TradingView npm package (Node-only,
         not Workers-compatible) to fetch VIX / S&P 500 / S5FI, plus CNN's dataviz
         JSON for Fear & Greed, computes the flag rules + composite, and POSTs the
-        completed snapshot here. Authenticated by a shared `Bearer` token whose
-        value is `CRON_SECRET` on the Worker side. Idempotent on `slot_ts` —
-        repeat submissions for the same slot return `200 {inserted: false}`.
+        completed snapshot here. **Unauthenticated in v1** — writes are
+        idempotent on `slot_ts` (D1 PK) and validated by schema + CHECK
+        constraints, and repeat submissions for the same slot return
+        `200 {inserted: false}`. Anyone on the internet can submit a snapshot;
+        this is an accepted trade-off for simplicity in v1.
       operationId: ingestSnapshot
-      security:
-        - cronSecret: []
       requestBody:
         required: true
         content:
@@ -144,12 +144,6 @@ paths:
                   inserted: { type: boolean, const: false }
         '400':
           description: Malformed body
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Missing / invalid bearer token
           content:
             application/json:
               schema:
@@ -388,12 +382,3 @@ components:
           maxItems: 4
           items:
             $ref: '#/components/schemas/SourceReading'
-  securitySchemes:
-    cronSecret:
-      type: http
-      scheme: bearer
-      bearerFormat: opaque
-      description: >
-        Shared secret matching `CRON_SECRET` on the Worker (set via
-        `wrangler secret put CRON_SECRET`). Same value is stored as the
-        `CRON_SECRET` GitHub Actions repository secret.

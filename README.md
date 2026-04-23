@@ -61,7 +61,7 @@ frontend/                — React + Vite SPA (deployed on Pages)
 ## Architecture
 
 - **GitHub Actions** runs the 30-minute cron (`.github/workflows/cron.yml`, `0,30 * * * *` UTC). The workflow invokes `scripts/cron/` — a small Node workspace that pulls VIX / S&P 500 daily / S5FI via the [`@mathieuc/tradingview`](https://www.npmjs.com/package/@mathieuc/tradingview) package and CNN Fear & Greed from CNN's own dataviz JSON, scores the four flags, and POSTs the resulting snapshot to the Worker.
-- **Cloudflare Workers** serves the HTTP API only: public GET endpoints for the dashboard, plus a bearer-authenticated `POST /api/cron/ingest` that accepts pre-computed snapshots from the cron runner.
+- **Cloudflare Workers** serves the HTTP API only: public GET endpoints for the dashboard, plus an unauthenticated `POST /api/cron/ingest` that accepts pre-computed snapshots from the cron runner (idempotent on `slot_ts`).
 - **Cloudflare D1** stores snapshots and source readings. Primary key on `slot_ts` makes ingest idempotent.
 - **Cloudflare Pages** hosts the SPA; it calls the Worker over the shared origin.
 
@@ -78,21 +78,16 @@ cd backend
 npx wrangler d1 create market-sentiment
 pnpm db:migrate        # apply migrations to the remote D1
 
-# 3. Set the shared ingest secret on the Worker
-#    Pick any long random string — same value goes into GH Actions below.
-npx wrangler secret put CRON_SECRET
-
-# 4. Deploy the Worker
+# 3. Deploy the Worker
 pnpm deploy            # → https://market-sentiment-api.<account>.workers.dev
 
-# 5. Deploy the frontend (Cloudflare Pages — dashboard or CLI)
+# 4. Deploy the frontend (Cloudflare Pages — dashboard or CLI)
 cd ../frontend
 pnpm build
 npx wrangler pages deploy dist
 
-# 6. Wire GitHub Actions secrets (repo Settings → Secrets → Actions)
-#    CRON_SECRET  — same value you set on the Worker
-#    WORKER_URL   — the workers.dev URL from step 4
+# 5. Wire GitHub Actions secret (repo Settings → Secrets → Actions)
+#    WORKER_URL   — the workers.dev URL from step 3
 # Optional repo Variables to override thresholds:
 #    VIX_THRESHOLD, FG_THRESHOLD, S5FI_THRESHOLD, SP500_RED_DAYS_MIN
 ```

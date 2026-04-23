@@ -31,7 +31,7 @@ short-term state; `spec.md` wins for product requirements**.
 - Specs, plan, research, data model, OpenAPI + UI contracts, quickstart, 104-task breakdown
 - Constitution v1.0.0 (`.specify/memory/constitution.md`)
 - **Cron runner (new workspace `scripts/cron/`)**: runs in Node on a GitHub Actions schedule (`0,30 * * * *`). Uses the `@mathieuc/tradingview` npm package (added manually to `package.json`, **not** installed locally) to pull VIX / S&P 500 daily / S5FI, and CNN's dataviz JSON endpoint for Fear & Greed. Computes the four flags + composite and POSTs to `/api/cron/ingest` on the Worker.
-- **Backend (Cloudflare Worker, read + ingest only)**: Hono router with `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest`, and the new bearer-authenticated `POST /api/cron/ingest`. Drizzle + D1 schema + 2 migrations. **No fetchers in the Worker anymore** — the live-data fetch path lives entirely in `scripts/cron/`. The Worker's `scheduled` handler is intentionally not exported (the 30-min cadence is GH Actions, not Cloudflare cron).
+- **Backend (Cloudflare Worker, read + ingest only)**: Hono router with `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest`, and the unauthenticated `POST /api/cron/ingest`. Drizzle + D1 schema + 2 migrations. **No fetchers in the Worker anymore** — the live-data fetch path lives entirely in `scripts/cron/`. The Worker's `scheduled` handler is intentionally not exported (the 30-min cadence is GH Actions, not Cloudflare cron).
 - Backend unit tests: slot rounding, flags, composite (the Worker still owns the scoring code as a second independent copy — drift between the two is guarded by these tests plus the parallel scoring file in `scripts/cron/src/scoring.ts`).
 - Frontend source (React + Vite + TanStack Query): heatmap, scoring breakdown, flag rows, empty/error/stale/partial state components, auto-refresh dashboard.
 - Design tokens + copy catalogue (enforced by ESLint: no hard-coded text in `frontend/src/components/**`).
@@ -94,12 +94,12 @@ them as standing instructions, not one-shot requests:
   cron runner rounds to the nearest 30-min slot via `currentSlot()`, and
   the ingest endpoint dedups by D1 primary key on `slot_ts`, so drift is
   harmless.
-- **Auth on ingest:** `POST /api/cron/ingest` requires
-  `Authorization: Bearer <CRON_SECRET>`. The shared secret is stored as
-  both a Cloudflare Worker secret (`wrangler secret put CRON_SECRET`) and
-  a GitHub Actions repository secret (`Settings → Secrets → Actions →
-  CRON_SECRET`). Must also set `WORKER_URL` as a GH Actions secret
-  pointing at the deployed Worker.
+- **Auth on ingest:** none. `POST /api/cron/ingest` is intentionally open
+  in v1 — writes are idempotent on `slot_ts` (D1 primary key) and validated
+  by Zod + D1 CHECK constraints, so a duplicate or malformed submission is
+  rejected or dedup'd. Anyone on the internet can POST a snapshot; this is
+  an accepted trade-off for v1 simplicity. Only `WORKER_URL` needs to be
+  set as a GH Actions secret.
 - **Scoring (see `spec.md` FR-005):** four binary flags × 25 points, so
   composite ∈ `{0, 25, 50, 75, 100}`.
   - VIX > 30
@@ -138,7 +138,7 @@ dashboard/
 │     ├─ scoring.ts                         (flags + composite — duplicated from backend)
 │     ├─ types.ts                           (SourceId, FetchResult<T>, payload types)
 │     ├─ fetchers/{vix,s5fi,sp500-daily,cnn-fg}.ts
-│     └─ post.ts                            (POST /api/cron/ingest with bearer token)
+│     └─ post.ts                            (POST /api/cron/ingest — unauthenticated)
 ├─ backend/                                 (Cloudflare Worker — read + ingest ONLY)
 │  ├─ wrangler.toml                         (cron triggers disabled, D1 binding placeholder)
 │  ├─ package.json                          (hono, zod, drizzle, wrangler — no fetchers)
@@ -146,7 +146,7 @@ dashboard/
 │  └─ src/
 │     ├─ worker.ts                          (default export { fetch } — NO scheduled handler)
 │     ├─ router.ts                          (mounts health/sources/snapshots/cron routes)
-│     ├─ env.ts                             (Env interface — includes CRON_SECRET)
+│     ├─ env.ts                             (Env interface — DB + threshold vars)
 │     ├─ config.ts                          (Zod-parsed ScoringConfig from env)
 │     ├─ routes/{health,sources,snapshots,ingest}.ts
 │     ├─ fetchers/types.ts                  (ONLY types.ts remains — live fetchers moved to scripts/cron)
@@ -175,9 +175,7 @@ The following are **required** to run anything but have not been done:
 | Cloudflare Wrangler auth | local `npx wrangler login` | Opens browser OAuth — ask first |
 | D1 database (remote) | `npx wrangler d1 create market-sentiment` | Paste returned `database_id` into `backend/wrangler.toml` (currently `REPLACE_WITH_WRANGLER_D1_CREATE_OUTPUT`) |
 | D1 migrations (remote) | `pnpm -F @market-sentiment/backend db:migrate` | Needs login + DB id |
-| **`CRON_SECRET` on Worker** | `npx wrangler secret put CRON_SECRET` | Shared with GH Actions; any long random string |
 | Worker deploy | `pnpm -F @market-sentiment/backend deploy` | Produces `https://market-sentiment-api.<account>.workers.dev` |
-| **`CRON_SECRET` on GitHub** | `Settings → Secrets → Actions → CRON_SECRET` | Same value as Worker secret above |
 | **`WORKER_URL` on GitHub** | `Settings → Secrets → Actions → WORKER_URL` | Deployed Worker base URL, no trailing slash |
 | Threshold env (optional) | `Settings → Secrets → Actions → Variables` | `VIX_THRESHOLD`, `FG_THRESHOLD`, `S5FI_THRESHOLD`, `SP500_RED_DAYS_MIN` — leave unset to use defaults |
 | Frontend build | `pnpm -F @market-sentiment/frontend build` | Output → `frontend/dist/` |

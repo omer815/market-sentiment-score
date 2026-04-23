@@ -30,9 +30,11 @@ Workers' V8 isolates** even with `nodejs_compat`. GH Actions runners are
 full Node environments where the package works.
 
 **New shape:** GH Actions → Node cron runner (`scripts/cron/`) → fetch &
-score → `POST /api/cron/ingest` on the Worker (bearer-authenticated via
-shared `CRON_SECRET`). D1 remains the source of truth, read via the
-existing GET endpoints. The Worker no longer exports `scheduled`.
+score → `POST /api/cron/ingest` on the Worker (unauthenticated in v1 —
+writes are idempotent on `slot_ts` via D1 primary key and validated by
+Zod + CHECK constraints; accepted trade-off for v1 simplicity). D1
+remains the source of truth, read via the existing GET endpoints. The
+Worker no longer exports `scheduled`.
 
 **Trade-offs accepted:**
 - GH Actions scheduled workflows have looser timing (5–15 min drift is
@@ -43,9 +45,12 @@ existing GET endpoints. The Worker no longer exports `scheduled`.
 - GH Actions auto-disables scheduled workflows after 60 days of no repo
   activity. Mitigated by the fact that this is an active project; a
   fallback alert can be added later if needed.
-- Authentication boundary widens: the Worker now has a write endpoint.
-  Mitigated by timing-safe bearer-token check + D1 CHECK constraints on
-  every column.
+- Authentication boundary widens: the Worker now has a write endpoint,
+  and in v1 it is intentionally **open** (no auth). Accepted because
+  writes are idempotent on `slot_ts` (D1 PK), schema-validated, and
+  guarded by D1 CHECK constraints. A bearer-token gate can be re-added
+  later (the v1 commit that removed it is trivial to revert) if abuse is
+  observed.
 
 ### B. Market data moved from Yahoo Finance to TradingView
 

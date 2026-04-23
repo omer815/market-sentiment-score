@@ -35,7 +35,6 @@ jobs:
       - name: Run cron
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
           VIX_THRESHOLD: ${{ vars.VIX_THRESHOLD }}
           FG_THRESHOLD: ${{ vars.FG_THRESHOLD }}
           S5FI_THRESHOLD: ${{ vars.S5FI_THRESHOLD }}

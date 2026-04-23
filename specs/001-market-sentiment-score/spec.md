@@ -21,11 +21,11 @@ Cloudflare, no D1 database created.
 | Specs, plan, research, data model, contracts, quickstart, tasks (104 items) | ✅ Complete | `specs/001-market-sentiment-score/` |
 | Constitution (code quality, testing, UX, performance) | ✅ Complete | `.specify/memory/constitution.md` v1.0.0 |
 | **Cron runner workspace** (`scripts/cron/`): TradingView package + CNN F&G + scoring + POST to Worker | ✅ Complete | Source-only; `pnpm install` not run locally |
-| GitHub Actions cron (`.github/workflows/cron.yml`) on `0,30 * * * *` UTC | ✅ Complete | Active only once secrets (`CRON_SECRET`, `WORKER_URL`) are set |
+| GitHub Actions cron (`.github/workflows/cron.yml`) on `0,30 * * * *` UTC | ✅ Complete | Active only once `WORKER_URL` secret is set |
 | Scoring (4 flag rules + composite 0/25/50/75/100) | ✅ Complete | Unit-tested in backend; duplicated in `scripts/cron/src/scoring.ts` |
 | D1 schema + migrations (snapshots, source_readings, source_metadata) | ✅ Written | Not applied anywhere |
 | Routes: `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest` | ✅ Complete | Not deployed |
-| Route: `POST /api/cron/ingest` (bearer-authenticated write from GH Actions) | ✅ Complete | Not deployed |
+| Route: `POST /api/cron/ingest` (unauthenticated write from GH Actions, idempotent on `slot_ts`) | ✅ Complete | Not deployed |
 | Cloudflare Worker `scheduled` handler | ❌ Removed | Intentional — the cron is now GH Actions (TradingView npm package needs Node, not V8 isolates) |
 | Frontend: heatmap, scoring breakdown, flag rows, empty/error/stale/partial states | ✅ Complete | US1 scope |
 | Frontend: auto-refresh polling (TanStack Query 30 s) | ✅ Complete | |
@@ -35,7 +35,7 @@ Cloudflare, no D1 database created.
 | E2E / Playwright / axe accessibility tests | ❌ **Not built** | Tasks T096–T099 in `tasks.md` |
 | Observability (Workers Analytics Engine, alerting) | ❌ **Not built** | Tasks T101–T103 |
 | Deployment to Cloudflare (D1 create, migrations, Worker deploy, Pages deploy) | ❌ **Not done** | Steps in `README.md` |
-| GH Actions secrets (`CRON_SECRET`, `WORKER_URL`) and `wrangler secret put CRON_SECRET` | ❌ **Not configured** | Required for the cron to succeed; see `HANDOFF.md` §6 |
+| GH Actions `WORKER_URL` secret | ❌ **Not configured** | Required for the cron to succeed; see `HANDOFF.md` §6 |
 
 **What's left to reach the full spec** lives in `specs/001-market-sentiment-score/tasks.md`:
 roughly tasks T064–T104 (User Story 2, User Story 3, and polish/observability/E2E). US1

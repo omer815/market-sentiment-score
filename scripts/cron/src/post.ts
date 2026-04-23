@@ -19,18 +19,11 @@ export interface IngestBody {
   readings: IngestReading[];
 }
 
-export async function postIngest(
-  workerUrl: string,
-  secret: string,
-  body: IngestBody,
-): Promise<void> {
+export async function postIngest(workerUrl: string, body: IngestBody): Promise<void> {
   const url = `${workerUrl.replace(/\/$/, '')}/api/cron/ingest`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${secret}`,
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) {

@@ -17,7 +17,6 @@ import { postIngest } from './post.js';
 
 async function main(): Promise<void> {
   const workerUrl = required('WORKER_URL');
-  const secret = required('CRON_SECRET');
   const cfg = loadConfig(process.env);
 
   const slotTs = currentSlot();
@@ -153,7 +152,7 @@ async function main(): Promise<void> {
     `[cron] composite=${composite.composite_score} status=${composite.status} failed=${composite.failed_sources.join('|') || 'none'}`,
   );
 
-  await postIngest(workerUrl, secret, body);
+  await postIngest(workerUrl, body);
   console.log('[cron] ingest POST ok');
 }
 
