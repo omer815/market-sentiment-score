@@ -11,6 +11,8 @@ description: "Task list for the Market Sentiment Score Dashboard feature"
 
 **Organization**: Tasks are grouped by user story. User Story 1 (P1) is the MVP; Story 2 (P2) adds automated refresh + persistence; Story 3 (P3) adds history.
 
+> **Implementation status (2026-04-23):** Source code for tasks in the **MVP (User Story 1, T001–T063)** has been written but nothing has been installed, deployed, or executed — the code has never run against D1 or a browser. Tasks in **User Story 2 (T064–T076)**, **User Story 3 (T077–T094)**, and **Polish (T095–T104)** are **not yet implemented**. See the "Implementation Status" table at the top of [spec.md](./spec.md) for the detailed breakdown. Checkboxes below remain unchecked until each task is verified end-to-end.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies on uncompleted tasks)

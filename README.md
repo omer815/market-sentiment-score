@@ -77,13 +77,17 @@ pnpm db:migrate    # apply migrations to the remote D1
 pnpm deploy
 ```
 
-## Status
+## Status — MVP only
 
-- Spec, plan, research, data model, contracts, quickstart, tasks: **complete**
-- Backend code (fetchers, scoring, storage, routes, cron, worker): **complete**
-- Frontend code (components, pages, styling, types): **complete (MVP scope — User Story 1)**
-- CI workflow: present (`.github/workflows/ci.yml`)
-- User Story 2 (auto-refresh + persistence beyond MVP) and User Story 3 (historical trend + charts): scaffolded via routes; UI not yet wired
-- Nothing installed, no dev server ever started — everything is source-only
+**Implemented only through the MVP (User Story 1 — "See the current buy/sell score at a glance").** User Stories 2 and 3 from the spec are **not yet built**, and nothing has been installed, deployed, or executed — all code is source-only.
+
+- ✅ Spec, plan, research, data model, contracts, quickstart, tasks (104 items), constitution
+- ✅ Backend source: fetchers, scoring flags + composite, D1 schema + migrations, routes, cron handler
+- ✅ Frontend source: heatmap, scoring breakdown, flag rows, empty/error/stale/partial states, auto-refresh polling
+- ✅ CI workflow (`.github/workflows/ci.yml`): typecheck + lint + unit tests
+- ❌ **Not yet built**: historical charts, S&P 500 candle chart UI, Playwright E2E, accessibility tests, observability/alerting, deployment to Cloudflare
+- ❌ **Not yet executed**: no `pnpm install`, no `wrangler d1 create`, no migrations applied, no Worker deploy, no Pages deploy, no live cron tick observed
+
+See [`specs/001-market-sentiment-score/spec.md`](specs/001-market-sentiment-score/spec.md) — the "Implementation Status" table at the top — and [`specs/001-market-sentiment-score/tasks.md`](specs/001-market-sentiment-score/tasks.md) for the remaining task list.
 
 See [`specs/001-market-sentiment-score/tasks.md`](specs/001-market-sentiment-score/tasks.md) for the remaining work items.

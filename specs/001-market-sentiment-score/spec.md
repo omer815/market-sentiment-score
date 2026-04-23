@@ -2,8 +2,45 @@
 
 **Feature Branch**: `001-market-sentiment-score`
 **Created**: 2026-04-23
-**Status**: Draft
+**Status**: MVP implemented (User Story 1 only) — User Stories 2 and 3 are **not yet built**
 **Input**: User description: "I want u create a website that do and show score of multiple sources in given time, I'm working of buy and sell. Need fetch data from VIX, CNN fear and greed, S&P 500 graph candels, C5FI grpah, And make s score of the values, Every 30 min and save that into a db so I can track the old data."
+
+## Implementation Status (as of 2026-04-23)
+
+Only the **MVP scope (User Story 1 — "See the current buy/sell score at a glance", P1)** has
+been implemented. Nothing has been installed, deployed, or executed yet — all code is
+source-only in the repo. No dev server, no `npm install`, no `wrangler` run against
+Cloudflare, no D1 database created.
+
+| Area | Status | Notes |
+| ---- | ------ | ----- |
+| Specs, plan, research, data model, contracts, quickstart, tasks (104 items) | ✅ Complete | `specs/001-market-sentiment-score/` |
+| Constitution (code quality, testing, UX, performance) | ✅ Complete | `.specify/memory/constitution.md` v1.0.0 |
+| Backend fetchers (VIX, CNN F&G, S5FI, S&P 500 daily) | ✅ Complete | Code only — never run |
+| S&P 500 intraday fetcher (for US3 candles) | ✅ Scaffolded | Not wired into UI yet |
+| Scoring (4 flag rules + composite 0/25/50/75/100) | ✅ Complete | Unit-tested |
+| D1 schema + migrations (snapshots, source_readings, source_metadata) | ✅ Written | Not applied anywhere |
+| Routes: `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest` | ✅ Complete | Not deployed |
+| Cron handler (`scheduled`) on `0,30 * * * *` UTC | ✅ Written | Not deployed |
+| Frontend: heatmap, scoring breakdown, flag rows, empty/error/stale/partial states | ✅ Complete | US1 scope |
+| Frontend: auto-refresh polling (TanStack Query 30 s) | ✅ Complete | |
+| Frontend: historical charts / range picker / S&P 500 candles | ❌ **Not built** | US3 work |
+| US2 operational proof (2 h of live cron ticks, dedup under retries, "stale-source" propagation) | ❌ **Not verified** | Backend code is there; has never run against D1 |
+| CI workflow (typecheck + lint + unit tests) | ✅ Present | `.github/workflows/ci.yml` |
+| E2E / Playwright / axe accessibility tests | ❌ **Not built** | Tasks T096–T099 in `tasks.md` |
+| Observability (Workers Analytics Engine, alerting) | ❌ **Not built** | Tasks T101–T103 |
+| Deployment to Cloudflare (D1 create, migrations, Worker deploy, Pages deploy) | ❌ **Not done** | Steps in `README.md` |
+
+**What's left to reach the full spec** lives in `specs/001-market-sentiment-score/tasks.md`:
+roughly tasks T064–T104 (User Story 2, User Story 3, and polish/observability/E2E). US1
+tasks T001–T063 are the part that now has source code — they are still unverified against
+a running environment.
+
+**Acceptance scenarios from US1 covered by code but not by live verification**: all three
+(composite renders, partial renders, heatmap + flag breakdown render). The behaviour is
+enforced by unit tests on the pure logic (flags, composite, slot rounding, S&P 500 daily
+parsing) and by the UI-state contract in `contracts/ui-contract.md`, but no browser, no
+Worker, and no D1 have been exercised end-to-end.
 
 ## Clarifications
 
