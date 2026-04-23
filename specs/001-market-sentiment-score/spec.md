@@ -20,13 +20,12 @@ Cloudflare, no D1 database created.
 | ---- | ------ | ----- |
 | Specs, plan, research, data model, contracts, quickstart, tasks (104 items) | ✅ Complete | `specs/001-market-sentiment-score/` |
 | Constitution (code quality, testing, UX, performance) | ✅ Complete | `.specify/memory/constitution.md` v1.0.0 |
-| **Cron runner workspace** (`scripts/cron/`): TradingView package + CNN F&G + scoring + POST to Worker | ✅ Complete | Source-only; `pnpm install` not run locally |
-| GitHub Actions cron (`.github/workflows/cron.yml`) on `0,30 * * * *` UTC | ✅ Complete | Active only once `WORKER_URL` secret is set |
-| Scoring (4 flag rules + composite 0/25/50/75/100) | ✅ Complete | Unit-tested in backend; duplicated in `scripts/cron/src/scoring.ts` |
+| **TradingView sidecar workspace** (`scripts/tradingview-sidecar/`, Vercel Node fn): wraps `@mathieuc/tradingview` behind `POST /fetch` | ❌ **Not implemented as planned** | Working tree still holds `scripts/cron/` from the prior iteration; TradingView fetcher code is reusable but needs rename + trim to just a POST handler per the refreshed plan |
+| Scoring (4 flag rules + composite 0/25/50/75/100) | ✅ Complete | Unit-tested in backend; a duplicate currently lives in `scripts/cron/src/scoring.ts` and will be deleted with that workspace's reshape |
 | D1 schema + migrations (snapshots, source_readings, source_metadata) | ✅ Written | Not applied anywhere |
 | Routes: `/api/health`, `/api/sources`, `/api/sources/:id`, `/api/snapshots`, `/api/snapshots/latest` | ✅ Complete | Not deployed |
-| Route: `POST /api/cron/ingest` (unauthenticated write from GH Actions, idempotent on `slot_ts`) | ✅ Complete | Not deployed |
-| Cloudflare Worker `scheduled` handler | ❌ Removed | Intentional — the cron is now GH Actions (TradingView npm package needs Node, not V8 isolates) |
+| Route: `POST /api/snapshots/refresh` (unauthenticated on-demand trigger, idempotent on `slot_ts`) | ❌ **Not implemented as planned** | Current tree has `POST /api/cron/ingest` from the prior iteration; will be replaced by `refresh.ts` + `orchestrator.ts` per the refreshed plan |
+| Cloudflare Worker `scheduled` handler | ❌ Not in MVP | Intentional — MVP trigger is `/refresh` (FR-018). Automatic 30-min cadence re-lands with User Story 2 |
 | Frontend: heatmap, scoring breakdown, flag rows, empty/error/stale/partial states | ✅ Complete | US1 scope |
 | Frontend: auto-refresh polling (TanStack Query 30 s) | ✅ Complete | |
 | Frontend: historical charts / range picker / S&P 500 candles | ❌ **Not built** | US3 work |
@@ -35,7 +34,7 @@ Cloudflare, no D1 database created.
 | E2E / Playwright / axe accessibility tests | ❌ **Not built** | Tasks T096–T099 in `tasks.md` |
 | Observability (Workers Analytics Engine, alerting) | ❌ **Not built** | Tasks T101–T103 |
 | Deployment to Cloudflare (D1 create, migrations, Worker deploy, Pages deploy) | ❌ **Not done** | Steps in `README.md` |
-| GH Actions `WORKER_URL` secret | ❌ **Not configured** | Required for the cron to succeed; see `HANDOFF.md` §6 |
+| `TRADINGVIEW_SIDECAR_URL` Worker secret (Vercel sidecar URL) | ❌ **Not configured** | Required for `/refresh` to reach the sidecar; see `HANDOFF.md` §6 |
 
 **What's left to reach the full spec** lives in `specs/001-market-sentiment-score/tasks.md`:
 roughly tasks T064–T104 (User Story 2, User Story 3, and polish/observability/E2E). US1
@@ -59,6 +58,10 @@ Worker, and no D1 have been exercised end-to-end.
 - Q: Are the 30-minute fetch slots clock-aligned? → A: Yes — aligned to `:00` and `:30` UTC. Each snapshot's slot timestamp is the scheduled slot (not the actual fetch moment) so historical rows are deterministic and join cleanly with standard 30-minute market bars.
 - Q: What is the composite scoring formula? → A: Four binary flags worth 25 points each (composite ∈ {0, 25, 50, 75, 100}): **+25** if VIX > 30; **+25** if CNN Fear & Greed < 20; **+25** if S5FI < 20; **+25** if the S&P 500 has closed red (down vs. prior close) for **at least 3 consecutive completed trading days** (a streak of 4, 5 or more also triggers). A flag that cannot be evaluated (source fetch failed) contributes 0 and the snapshot is flagged `partial`.
 - Q: How is the final score displayed? → A: As a red-to-green heatmap where 0 = red, 50 = yellow, 100 = green, with intermediate discrete stops at 25 and 75. Each flag is also shown individually with ✓/✗ and its current raw value + threshold, so the user can see which conditions contributed.
+- Q: How does the dashboard trigger a refresh in MVP (no automatic cron)? → A: A manual Refresh button on the dashboard is the canonical trigger. The UI additionally auto-invokes `POST /api/snapshots/refresh` **once on initial page load if and only if no snapshot exists yet** (first-ever visit, empty database). Once at least one snapshot exists, subsequent page loads MUST NOT auto-trigger — the user clicks the button when they want fresher data.
+- Q: With cron deferred to post-MVP, what happens to the three success criteria that presumed a schedule (SC-002, SC-003, SC-005)? → A: SC-002 is explicitly **deferred** (it's a literal reliability target on the schedule and is not evaluable without one). SC-003 is **reinterpreted** to "100% of successful `/refresh` calls persist to D1", and SC-005 is **reinterpreted** to "a single `/refresh` returns a partial composite when exactly one source fails, within the refresh's end-to-end budget". Both reinterpretations remain fully testable in MVP.
+- Q: When does the dashboard show a "stale" badge now that refresh is user-triggered? → A: **No stale badge in MVP.** The dashboard shows the snapshot's relative age prominently ("Last refreshed: 3 h ago", updating at least once per minute). A dedicated stale badge may return with User Story 2 when automatic cadence makes "stale" mean "scheduled trigger was late".
+- Q: How are FR-001…FR-004's "30-minute schedule" clauses reconciled with the on-demand MVP trigger? → A: Add a framing paragraph at the top of "Functional Requirements" that distinguishes the *what* (which value from which endpoint — unchanged across MVP and US2) from the *when* (in MVP the trigger is `/refresh` per FR-018; the 30-minute schedule cadence lands with US2). Per-source FRs stay unchanged.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -99,6 +102,20 @@ update. Delivers immediate decision-support value on its own.
    "Strong buy" at 100, "Neutral" at 50, "Strong sell/caution" at 0),
    and each of the four flags is visibly listed with its threshold rule,
    current raw value, ✓/✗ state, and points contribution.
+4. **Given** the dashboard is open,
+   **When** the user clicks the Refresh button,
+   **Then** the button enters a busy/disabled state while the refresh is
+   in flight (typically 2–6 s), the heatmap and flag rows show a
+   non-blocking "refreshing" indicator, and on completion the UI updates
+   to the new snapshot (or surfaces an error if the refresh failed).
+   Repeat clicks within the same 30-min slot return the existing row and
+   produce no UI change.
+5. **Given** the database is empty (first-ever visit to the dashboard),
+   **When** the user opens the dashboard,
+   **Then** the UI auto-invokes `POST /api/snapshots/refresh` exactly
+   once, shows a loading state during the refresh, and on completion
+   renders the first snapshot. If at least one snapshot already exists,
+   this auto-invocation MUST NOT occur.
 
 ---
 
@@ -201,6 +218,15 @@ snapshots.
 
 ### Functional Requirements
 
+> **Trigger model.** The per-source `MUST fetch … on a 30-minute schedule`
+> clauses in FR-001 through FR-004 describe the *what* (which value,
+> from where) and the *when* (cadence). In MVP the *when* is the user-
+> triggered `POST /api/snapshots/refresh` endpoint (see FR-018); the
+> 30-minute-schedule cadence is fulfilled once User Story 2 reintroduces
+> an automatic scheduler. The *what* clauses (source endpoints, values,
+> threshold rules) apply identically in both phases — only the trigger
+> model changes.
+
 - **FR-001**: System MUST fetch the current VIX value on a 30-minute
   schedule.
 - **FR-002**: System MUST fetch the current CNN Fear & Greed Index value on
@@ -268,9 +294,13 @@ snapshots.
 - **FR-013**: System MUST record fetch failures (per source, per cycle) so
   that gaps are observable in historical views rather than silently
   hidden.
-- **FR-014**: System MUST display, on every view, the timestamp of the most
-  recent successful fetch and a clear indication when data is stale (e.g.,
-  fetch has not succeeded within the last cycle).
+- **FR-014**: The dashboard MUST display, prominently on every view,
+  the relative age of the most recent successful snapshot (e.g.,
+  "Last refreshed: 3 h ago", updating at least once per minute while
+  the view is open). In MVP this age indicator replaces any "stale"
+  badge — because refresh is user-triggered, there is no scheduled
+  cadence to be late relative to. A dedicated stale-data badge MAY
+  return when User Story 2 reintroduces the automatic schedule.
 - **FR-015**: The dashboard view MUST update to reflect a new persisted
   snapshot without requiring the user to reload the page.
 - **FR-016**: The composite score MUST be rendered as a red-to-green
@@ -289,6 +319,19 @@ snapshots.
   or 25). If the source's fetch failed, the flag row MUST display the
   failure state instead of a ✗, so the user can distinguish "flag not
   triggered" from "flag not evaluated".
+- **FR-018** *(MVP trigger UX — on-demand refresh)*: The dashboard MUST
+  expose an explicit user-triggered **Refresh** action that invokes
+  `POST /api/snapshots/refresh`. While a refresh is in flight the
+  control MUST enter a busy/disabled state to prevent duplicate
+  triggers; on completion the UI MUST update to the new snapshot or
+  surface an error. Additionally, the UI MUST auto-invoke
+  `POST /api/snapshots/refresh` **exactly once on initial page load if
+  and only if no snapshot exists yet** (empty database). Once at least
+  one snapshot exists, subsequent page loads MUST NOT auto-trigger a
+  refresh — the user clicks the Refresh button when they want fresher
+  data. This requirement supersedes any implicit expectation of
+  automatic fetching in MVP; automatic 30-minute cadence is tracked by
+  User Story 2 and is deferred post-MVP.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -313,17 +356,25 @@ snapshots.
 - **SC-001**: On first visit to the dashboard (after at least one snapshot
   exists), a user can identify the current buy/sell leaning within 5
   seconds of the page loading.
-- **SC-002**: At least 95% of scheduled 30-minute fetch cycles complete
-  successfully (all sources) over any rolling 7-day window, under normal
-  upstream availability.
-- **SC-003**: 100% of completed fetch cycles are persisted and queryable
-  afterwards; no cycle is lost to the database.
+- **SC-002** *(deferred post-MVP — tracked with User Story 2)*: At least
+  95% of scheduled 30-minute fetch cycles complete successfully (all
+  sources) over any rolling 7-day window, under normal upstream
+  availability. Not evaluable in MVP (no automatic schedule exists);
+  re-lands when US2 re-introduces the scheduled trigger.
+- **SC-003**: 100% of successful `POST /api/snapshots/refresh` calls
+  persist their snapshot row-set (snapshots + source_readings) to D1;
+  no successful refresh is silently lost. In MVP this is the only write
+  path; once US2 reintroduces scheduled cycles, this criterion applies
+  to both triggers.
 - **SC-004**: A user can load a 30-day historical view of the composite
   score and all sources and see the chart rendered within 3 seconds of
   selecting the range.
-- **SC-005**: When exactly one upstream source is unavailable, a partial
-  composite score is still rendered within one 30-minute cycle of the
-  outage starting.
+- **SC-005**: When exactly one upstream source is unavailable, a single
+  `POST /api/snapshots/refresh` call returns a `partial` composite score
+  (computed from the remaining successful sources, with the failed
+  source clearly marked) within the refresh's end-to-end latency
+  budget. In MVP this replaces the original "within one 30-minute
+  cycle" phrasing, which presumed an automatic schedule.
 - **SC-006**: Over a 6-month period, at least 90% of all originally-captured
   snapshots are still queryable (i.e., historical data is retained
   reliably, not aged out silently).
@@ -368,12 +419,14 @@ snapshots.
 - **Data providers**: Upstream feeds are reached via publicly available
   endpoints or an affordable consumer market-data provider. Provider
   selection is a planning-phase decision.
-- **Deployment model**: The fetcher, database, and web UI MUST run on a
-  free-tier cloud / serverless stack (e.g., Cloudflare Workers + Cron
-  Triggers + D1/Turso, or equivalent free-forever managed PaaS). No
-  always-on VM, laptop, or paid tier is to be introduced in v1. The
-  scheduling mechanism MUST be a managed cron/scheduled-task feature of
-  the chosen platform so the 30-minute cadence runs without a dedicated
-  always-on process.
+- **Deployment model**: The API, database, and web UI MUST run on a
+  free-tier cloud / serverless stack. No always-on VM, laptop, or paid
+  tier is to be introduced in v1. In **MVP** there is no background
+  scheduler — the 30-minute cadence is deferred to User Story 2, and
+  fetches happen on demand via `POST /api/snapshots/refresh` (FR-018).
+  **When US2 re-lands the 30-minute cadence**, the scheduling mechanism
+  MUST be a managed cron / scheduled-task feature of the chosen
+  platform (or an equivalent free external scheduler) so the cadence
+  runs without a dedicated always-on process.
 - **Time zone**: All timestamps are stored in UTC and displayed in the
   user's local time zone.
