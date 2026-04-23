@@ -7,6 +7,10 @@
 
 ## Implementation Status (as of 2026-04-23)
 
+> **If you are starting a new session, read [HANDOFF.md](./HANDOFF.md) first.** It captures
+> owner preferences, locked decisions, open questions, and the exact environment state
+> (nothing installed, nothing deployed) that this section summarises.
+
 Only the **MVP scope (User Story 1 — "See the current buy/sell score at a glance", P1)** has
 been implemented. Nothing has been installed, deployed, or executed yet — all code is
 source-only in the repo. No dev server, no `npm install`, no `wrangler` run against

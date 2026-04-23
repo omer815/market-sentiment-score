@@ -77,6 +77,9 @@ pnpm db:migrate    # apply migrations to the remote D1
 pnpm deploy
 ```
 
+> **Resuming on a new machine or in a new session?** Start with
+> [`specs/001-market-sentiment-score/HANDOFF.md`](specs/001-market-sentiment-score/HANDOFF.md).
+
 ## Status — MVP only
 
 **Implemented only through the MVP (User Story 1 — "See the current buy/sell score at a glance").** User Stories 2 and 3 from the spec are **not yet built**, and nothing has been installed, deployed, or executed — all code is source-only.
