@@ -1,6 +1,23 @@
 # Session Handoff — Market Sentiment Score
 
-**Written:** 2026-04-23 · **Last refreshed:** 2026-04-23 (on-demand `/refresh` + Vercel TradingView sidecar pivot) · **Owner:** omer (GitHub: `omer815`) · **Status:** MVP source complete, nothing deployed
+**Written:** 2026-04-23 · **Last refreshed:** 2026-06-11 (Phase 1 radical simplification — single Vercel app, 3 signals via Yahoo+CNN, no DB/TradingView) · **Owner:** omer (GitHub: `omer815`) · **Status:** Phase 1 source complete, nothing deployed
+
+> **PHASE 1 ARCHITECTURE (current).** The project was radically simplified on
+> 2026-06-11. The Cloudflare Worker + D1 + Pages + Vercel TradingView sidecar
+> are **all gone** (deleted from the repo; in git history). It is now **one
+> stateless Vercel app**:
+>   - `GET /` → minimal server-rendered HTML page (score + 3 ✓/✗ rows).
+>   - `GET /api/score` → JSON contract for the externally-designed UI.
+>   - `lib/pipeline.ts` fans out to 3 fetchers in-process and scores live.
+> **Three signals** (S5FI dropped — not on Yahoo): VIX (`^VIX`) and S&P 500
+> red-day streak (`^GSPC`) from Yahoo Finance's `v8/finance/chart` JSON, and CNN
+> Fear & Greed direct. **Score = round(triggered / 3 × 100) → {0,33,67,100}**.
+> No database, no TradingView, no WebSocket, no second provider, no build step.
+> Only runtime dep: `zod`. Source of truth: `simplification-design.md` +
+> `docs/superpowers/plans/2026-06-11-market-sentiment-simplification.md`.
+> **Deferred to Phase 2:** persistence/history, S5FI (+ return to a 4-signal /
+> 0–100-by-25 scale), scheduler, charts. Sections 2–9 below describe the OLD
+> multi-provider MVP and are retained only for Phase-2 reference.
 
 This document is the single-read briefing for whoever (human or AI) picks up
 this project in a new session / on a new machine. If something here

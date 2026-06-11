@@ -21,17 +21,12 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      # Non-frozen until a pnpm-lock.yaml is committed (created at first install).
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Typecheck (all workspaces)
-        run: pnpm -r typecheck
+      - name: Typecheck
+        run: pnpm typecheck
 
-      - name: Lint (all workspaces)
-        run: pnpm -r lint
-
-      - name: Unit tests — backend
-        run: pnpm --filter @market-sentiment/backend test:unit
-
-      - name: Unit tests — frontend
-        run: pnpm --filter @market-sentiment/frontend test:unit
+      - name: Unit tests
+        run: pnpm test
