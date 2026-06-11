@@ -12,6 +12,11 @@ const COMMON_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
+// Per-request timeout. The Vercel function caps at 10s; an 8s per-source budget
+// lets a slow/hanging source fail fast so the other signals still produce a
+// (partial) score instead of the whole response timing out.
+const FETCH_TIMEOUT_MS = 8000;
+
 // ---- Yahoo Finance chart endpoint ----
 const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
@@ -55,7 +60,10 @@ async function fetchYahooChart(
 ): Promise<YahooChart> {
   // The caret in ^VIX / ^GSPC must be URL-encoded in the path.
   const url = `${YAHOO_CHART}${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
-  const res = await fetchImpl(url, { headers: COMMON_HEADERS });
+  const res = await fetchImpl(url, {
+    headers: COMMON_HEADERS,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Yahoo ${symbol} HTTP ${res.status}: ${body.slice(0, 120)}`);
@@ -101,7 +109,10 @@ export type CnnParse = { ok: true; raw: number } | { ok: false; error: string };
 
 export async function fetchCnnFearAndGreed(fetchImpl: typeof fetch = fetch): Promise<CnnParse> {
   try {
-    const res = await fetchImpl(CNN_URL, { headers: COMMON_HEADERS });
+    const res = await fetchImpl(CNN_URL, {
+      headers: COMMON_HEADERS,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) {
       const body = await res.text();
       return { ok: false, error: `CNN F&G HTTP ${res.status}: ${body.slice(0, 120)}` };
