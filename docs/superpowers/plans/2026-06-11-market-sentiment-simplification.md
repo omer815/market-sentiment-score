@@ -508,7 +508,10 @@ Expected: FAIL — `Cannot find module '../lib/fetchers.js'`.
 // All Phase-1 data sources over plain HTTP/JSON. No WebSocket, no extra deps.
 // Yahoo + CNN both require a browser-shaped User-Agent (bot/empty UAs get 403/429).
 
-const UA = 'Mozilla/5.0 (market-sentiment-dashboard)';
+// CNN returns HTTP 418 for bot-ish UAs and 200 only for a realistic browser UA
+// (verified 2026-06-11). Node's fetch handles gzip/br decompression automatically.
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const COMMON_HEADERS = {
   'User-Agent': UA,
   Accept: 'application/json, text/plain, */*',
@@ -950,7 +953,7 @@ curl -s https://<project>.vercel.app/api/score | jq .
 ```
 Expected: JSON with `score` ∈ {0,33,67,100} and 3 signals. Then open the root URL and confirm the HTML renders the score + 3 rows.
 
-If Yahoo returns an error, try the symbol fallbacks in `lib/fetchers.ts` (`^VIX`/`^GSPC` are already URL-encoded; if blocked, switch host to `query2.finance.yahoo.com`). If CNN 403s, confirm the `User-Agent` header is being sent.
+If Yahoo returns an error, try the symbol fallbacks in `lib/fetchers.ts` (`^VIX`/`^GSPC` are already URL-encoded; if blocked, switch host to `query2.finance.yahoo.com`). CNN returns **418** (not 403) for a non-browser UA — the realistic Chrome UA in `COMMON_HEADERS` is verified to return 200 from a residential IP. **Residual risk:** CNN/Yahoo may treat Vercel's datacenter IP ranges differently; this can only be confirmed here, at deploy. If CNN 418s from Vercel despite the browser UA, the fallback is to read F&G from an alternate mirror or treat it as an unavailable source (score degrades gracefully to `partial`).
 
 - [ ] **Step 5: Push the branch + fast-forward main** (ASK FIRST — network)
 
